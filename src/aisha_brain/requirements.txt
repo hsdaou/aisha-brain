@@ -1,0 +1,29 @@
+# AI-SHA Brain - Python Dependencies
+# Install: pip install -r requirements.txt
+#
+# Note: ROS2 packages (rclpy, std_msgs) come from the ROS2 installation,
+# not pip. System tools (piper, aplay) must be installed separately.
+
+# LLM inference (local)
+ollama>=0.4.0
+
+# RAG pipeline
+llama-index-core>=0.11.0
+llama-index-vector-stores-chroma>=0.2.0
+llama-index-embeddings-huggingface>=0.3.0
+llama-index-llms-ollama>=0.3.0
+
+# Vector database
+chromadb>=0.5.0
+
+# Embeddings
+sentence-transformers>=3.0.0
+
+# HTTP client (used by brain_node for Ollama API)
+requests>=2.31.0
+
+# Web scraping for knowledge base building (optional, dev only)
+# crawl4ai>=0.2.0
+
+# Utilities
+setuptools>=68.0.0

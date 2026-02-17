@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# Knowledge DB (binary, rebuilt from raw data)
+**/aisha_knowledge_db/
+school_knowledge_base/
+
+# Ollama logs
+ollama.log
+
+# OS
+.DS_Store
+*.swp
+*~
+
+# Claude Code
+.claude/
