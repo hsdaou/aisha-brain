@@ -16,11 +16,20 @@ class AdminNode(Node):
         self.subscription = self.create_subscription(String, '/admin_task', self.handle_query, 10)
         self.speech_publisher = self.create_publisher(String, '/robot_speech', 10)
 
-        # Use parameter for knowledge base path so it works in any environment
-        default_kb_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'aisha_knowledge_db'
-        )
+        # Resolve KB path via ament_index so it works regardless of where
+        # Python loads this file from (site-packages vs source tree).
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            default_kb_path = os.path.join(
+                get_package_share_directory('aisha_brain'),
+                'aisha_knowledge_db'
+            )
+        except Exception:
+            # Fallback for running outside a colcon workspace
+            default_kb_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'aisha_knowledge_db'
+            )
         self.declare_parameter('knowledge_db_path', default_kb_path)
         self.declare_parameter('ollama_url', 'http://127.0.0.1:11434')
         self.declare_parameter('llm_model', 'llama3.2')
