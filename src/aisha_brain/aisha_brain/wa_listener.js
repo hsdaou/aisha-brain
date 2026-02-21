@@ -15,6 +15,14 @@
 const path = require('path');
 const fs   = require('fs');
 
+// Silence all console.* output — only process.stdout.write (our JSON lines)
+// and process.stderr.write (our status messages) should escape.
+console.log   = () => {};
+console.debug = () => {};
+console.info  = () => {};
+console.warn  = () => {};
+console.error = () => {};
+
 // ---- locate baileys next to mudslide ----
 const BAILEYS_PATH = process.env.BAILEYS_PATH ||
     '/home/robot-wst/.npm/_npx/3d8e8e1f43a0b507/node_modules/baileys';
