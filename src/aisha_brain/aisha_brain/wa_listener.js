@@ -70,23 +70,31 @@ async function start() {
     sock.ev.on('messages.upsert', ({ messages, type }) => {
         if (type !== 'notify') return;
         for (const msg of messages) {
-            if (msg.key.fromMe) continue;           // ignore own messages
-            if (!msg.message)   continue;           // ignore empty/status
+            if (!msg.message) continue;
 
-            // Extract plain text — handle text, extended, and image captions
+            // Accept messages sent FROM the linked device (fromMe=true, i.e. the authorized user
+            // messaging the robot from their own phone) OR received from others (fromMe=false,
+            // i.e. a third party — filtered by allowed_number in whatsapp_listener.py).
+            // Reject only protocol/app messages that have no remoteJid.
+            const rawJid = msg.key.remoteJid || '';
+            if (!rawJid) continue;
+
+            // Extract plain text
             const text =
                 msg.message.conversation ||
                 msg.message.extendedTextMessage?.text ||
                 msg.message.imageMessage?.caption ||
+                msg.message.ephemeralMessage?.message?.conversation ||
+                msg.message.viewOnceMessage?.message?.conversation ||
                 '';
 
             if (!text.trim()) continue;
 
-            // Extract sender phone number (strip @s.whatsapp.net)
-            const from = (msg.key.remoteJid || '').replace('@s.whatsapp.net', '');
+            // Strip @suffix and tag fromMe so Python can distinguish authorized owner
+            const from = rawJid.replace(/@.+$/, '');
+            const fromMe = !!msg.key.fromMe;
 
-            // Emit as JSON line for the Python node to read
-            process.stdout.write(JSON.stringify({ from, message: text.trim() }) + '\n');
+            process.stdout.write(JSON.stringify({ from, message: text.trim(), fromMe }) + '\n');
         }
     });
 }

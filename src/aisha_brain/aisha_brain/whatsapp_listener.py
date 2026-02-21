@@ -92,11 +92,16 @@ class WhatsAppListener(Node):
                         data = json.loads(line)
                         sender = data.get('from', '')
                         text = data.get('message', '').strip()
+                        from_me = data.get('fromMe', False)
 
                         if not text:
                             continue
 
-                        if self.allowed_number in sender:
+                        # Accept if: sent by the linked device owner (fromMe=true)
+                        # OR received from the configured allowed number.
+                        # WhatsApp @lid JIDs don't contain the phone number, so
+                        # fromMe is the reliable way to identify the owner's messages.
+                        if from_me or self.allowed_number in sender:
                             self.get_logger().info(f'Authorized message from {sender}: {text}')
                             self._msg_queue.put(text)
                         else:
