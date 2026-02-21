@@ -5,9 +5,18 @@ import subprocess
 import threading
 import queue
 import time
+import json
+import os
 
 
 class WhatsAppListener(Node):
+    """Listen for incoming WhatsApp messages via wa_listener.js.
+
+    Publishes authorized messages to /user_speech so the brain can process them.
+    Uses a Node.js script (wa_listener.js) that reuses mudslide's auth credentials
+    and outputs JSON lines: {"from": "971XXXXXXXXX", "message": "..."}
+    """
+
     def __init__(self):
         super().__init__('ai_sha_listener')
         self.publisher_ = self.create_publisher(String, '/user_speech', 10)
@@ -15,13 +24,26 @@ class WhatsAppListener(Node):
         self.declare_parameter('allowed_number', '971509726902')
         self.allowed_number = self.get_parameter('allowed_number').get_parameter_value().string_value
 
+        # Resolve wa_listener.js — try ament share dir first, then alongside this file
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            self._listener_script = os.path.join(
+                get_package_share_directory('aisha_brain'),
+                'wa_listener.js'
+            )
+        except Exception:
+            self._listener_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                'wa_listener.js'
+            )
+
         # Thread-safe queue: monitor thread enqueues, timer callback publishes
         self._msg_queue = queue.SimpleQueue()
         self._publish_timer = self.create_timer(0.1, self._publish_pending)
 
         self.get_logger().info(f'WhatsApp Listener Online - authorized: {self.allowed_number}')
 
-        self.monitor_thread = threading.Thread(target=self.monitor_whatsapp, daemon=True)
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
     def _publish_pending(self):
@@ -35,49 +57,76 @@ class WhatsAppListener(Node):
             except queue.Empty:
                 break
 
-    def monitor_whatsapp(self):
+    def _monitor_loop(self):
+        """Run wa_listener.js and parse its JSON-line output."""
+        if not os.path.exists(self._listener_script):
+            self.get_logger().error(
+                f'wa_listener.js not found at {self._listener_script}. '
+                'WhatsApp listener cannot start.'
+            )
+            return
+
         while rclpy.ok():
             try:
                 process = subprocess.Popen(
-                    ['npx', 'mudslide', 'monitor'],
+                    ['node', self._listener_script],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1
                 )
 
-                while rclpy.ok():
-                    line = process.stdout.readline()
+                # Log stderr (connection status) in a background thread
+                threading.Thread(
+                    target=self._log_stderr,
+                    args=(process,),
+                    daemon=True
+                ).start()
+
+                # Read JSON lines from stdout
+                for line in process.stdout:
+                    line = line.strip()
                     if not line:
-                        break
+                        continue
+                    try:
+                        data = json.loads(line)
+                        sender = data.get('from', '')
+                        text = data.get('message', '').strip()
 
-                    if "Message from" in line:
-                        try:
-                            parts = line.split(": ", 1)
-                            if len(parts) < 2:
-                                continue
-                            sender_info = parts[0]
-                            message_text = parts[1].strip()
-                            sender_number = sender_info.split("from ")[1].strip()
+                        if not text:
+                            continue
 
-                            if self.allowed_number in sender_number:
-                                self.get_logger().info(f'Authorized: {message_text}')
-                                self._msg_queue.put(message_text)
-                            else:
-                                self.get_logger().warn(f'Ignored from unauthorized: {sender_number}')
-                        except (IndexError, ValueError):
-                            pass
+                        if self.allowed_number in sender:
+                            self.get_logger().info(f'Authorized message from {sender}: {text}')
+                            self._msg_queue.put(text)
+                        else:
+                            self.get_logger().warn(f'Ignored message from unauthorized: {sender}')
+
+                    except json.JSONDecodeError:
+                        self.get_logger().warn(f'Unexpected output from wa_listener.js: {line}')
 
                 process.wait()
-                self.get_logger().warn('mudslide monitor exited, restarting in 5s...')
-                time.sleep(5)
+                if rclpy.ok():
+                    self.get_logger().warn('wa_listener.js exited, restarting in 5s...')
+                    time.sleep(5)
 
             except FileNotFoundError:
-                self.get_logger().error('npx/mudslide not found - WhatsApp listener cannot start')
+                self.get_logger().error('node not found - cannot start WhatsApp listener')
                 break
             except Exception as e:
                 self.get_logger().error(f'Monitor error: {e}, restarting in 5s...')
                 time.sleep(5)
+
+    def _log_stderr(self, process):
+        """Forward wa_listener.js stderr to ROS2 logger."""
+        for line in process.stderr:
+            line = line.strip()
+            if not line:
+                continue
+            if 'ERROR' in line:
+                self.get_logger().error(f'[wa_listener] {line}')
+            else:
+                self.get_logger().info(f'[wa_listener] {line}')
 
 
 def main(args=None):
@@ -86,6 +135,7 @@ def main(args=None):
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

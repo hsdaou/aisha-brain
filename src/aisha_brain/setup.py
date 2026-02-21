@@ -30,6 +30,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml') + glob('config/*.json')),
+        (os.path.join('share', package_name), glob('aisha_brain/wa_listener.js')),
     ] + _kb_data_files(),
     install_requires=['setuptools'],
     zip_safe=True,
