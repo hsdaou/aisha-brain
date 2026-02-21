@@ -5,9 +5,28 @@ import json
 import os
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.core import VectorStoreIndex, StorageContext
+from llama_index.core import VectorStoreIndex, StorageContext, Settings
+from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.ollama import Ollama
+
+
+SYSTEM_PROMPT = """You are AI-SHA, the helpful administrative assistant robot for ISC-Sharjah (International School of Choueifat, Sharjah).
+
+Your job is to answer questions about ISC-Sharjah using the provided school knowledge base.
+
+Key facts you must know:
+- SLO stands for Student Life Organization (also called SABIS Student Life Organization). It is a student-run leadership and community organization with departments like Academic, Discipline, Sports, Arts, Community Service, and more.
+- A prefect is a student leader in the SLO.
+- The school phone is +971 6 558 2211 and email is info@iscsharjah.sabis.net.
+
+Rules:
+- Always use the retrieved context to answer. Do not make up information.
+- If a follow-up question refers to something mentioned earlier in the conversation, use that context.
+- Keep answers concise and friendly (2-4 sentences for most questions).
+- If you truly cannot find the answer, say so politely and suggest contacting the school.
+- Do not reveal that you are built on an LLM or that you use a knowledge base.
+"""
 
 
 class AdminNode(Node):
@@ -34,14 +53,19 @@ class AdminNode(Node):
         self.declare_parameter('ollama_url', 'http://127.0.0.1:11434')
         self.declare_parameter('llm_model', 'llama3.2')
         self.declare_parameter('llm_timeout', 120.0)
+        self.declare_parameter('similarity_top_k', 6)
 
         kb_path = self.get_parameter('knowledge_db_path').get_parameter_value().string_value
         ollama_url = self.get_parameter('ollama_url').get_parameter_value().string_value
         llm_model = self.get_parameter('llm_model').get_parameter_value().string_value
         llm_timeout = self.get_parameter('llm_timeout').get_parameter_value().double_value
+        similarity_top_k = self.get_parameter('similarity_top_k').get_parameter_value().integer_value
 
         self.get_logger().info(f'Connecting to Knowledge Base at: {kb_path}')
-        self.query_engine = None
+        self.index = None
+        self.embed_model = None
+        self.llm = None
+        self.similarity_top_k = similarity_top_k
 
         try:
             db = chromadb.PersistentClient(path=kb_path)
@@ -55,42 +79,91 @@ class AdminNode(Node):
                 vector_store,
                 embed_model=self.embed_model
             )
-            self.query_engine = self.index.as_query_engine(llm=self.llm)
-            self.get_logger().info('Knowledge Base Online')
+            self.get_logger().info(f'Knowledge Base Online (top_k={similarity_top_k})')
 
         except Exception as e:
             self.get_logger().error(f'Failed to initialize knowledge base: {e}')
             self.get_logger().error('AdminNode will return fallback responses until KB is available')
 
+    def _build_messages(self, history: list, user_question: str, context_str: str) -> list:
+        """Build a list of ChatMessage objects with system prompt, history, and current question."""
+        messages = [
+            ChatMessage(
+                role=MessageRole.SYSTEM,
+                content=SYSTEM_PROMPT + f"\n\nRelevant school knowledge:\n{context_str}"
+            )
+        ]
+        # Add conversation history
+        for turn in history:
+            messages.append(ChatMessage(role=MessageRole.USER, content=turn.get('user', '')))
+            messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=turn.get('assistant', '')))
+
+        # Add current question
+        messages.append(ChatMessage(role=MessageRole.USER, content=user_question))
+        return messages
+
     def handle_query(self, msg):
         try:
             data = json.loads(msg.data)
-            user_question = data.get("details", "")
+            user_question = data.get("details", "").strip()
+            history = data.get("history", [])  # list of {"user": ..., "assistant": ...}
+
             if not user_question:
                 return
 
             self.get_logger().info(f'Query: {user_question}')
+            if history:
+                self.get_logger().info(f'  with {len(history)} prior turn(s) of context')
 
-            if self.query_engine is None:
+            if self.index is None:
                 answer = "I'm sorry, my knowledge base is not available right now. Please try again later."
-            else:
-                response = self.query_engine.query(user_question)
-                answer = str(response).strip()
-                if not answer:
-                    answer = "I could not find information about that. Could you rephrase your question?"
+                self._publish(answer)
+                return
 
-            out_msg = String()
-            out_msg.data = answer
-            self.speech_publisher.publish(out_msg)
-            self.get_logger().info(f'Answer: {answer[:100]}...' if len(answer) > 100 else f'Answer: {answer}')
+            # Step 1: Retrieve relevant context from the vector store
+            retriever = self.index.as_retriever(
+                similarity_top_k=self.similarity_top_k,
+                embed_model=self.embed_model
+            )
+
+            # Build retrieval query: if there's history, prepend last user turn for context
+            retrieval_query = user_question
+            if history:
+                last_user = history[-1].get('user', '')
+                if last_user and last_user.lower() != user_question.lower():
+                    retrieval_query = f"{last_user} {user_question}"
+
+            nodes = retriever.retrieve(retrieval_query)
+            context_str = "\n\n".join(
+                f"[Source: {n.metadata.get('file_name', 'knowledge base')}]\n{n.text}"
+                for n in nodes
+            ) if nodes else "No specific context found."
+
+            self.get_logger().debug(f'Retrieved {len(nodes)} chunks for query: {retrieval_query!r}')
+
+            # Step 2: Build chat messages with system prompt + history + context
+            messages = self._build_messages(history, user_question, context_str)
+
+            # Step 3: Call LLM with full chat context
+            response = self.llm.chat(messages)
+            answer = str(response.message.content).strip()
+
+            if not answer:
+                answer = "I could not find information about that. Could you rephrase your question?"
+
+            self._publish(answer)
+            self.get_logger().info(f'Answer: {answer[:120]}...' if len(answer) > 120 else f'Answer: {answer}')
 
         except json.JSONDecodeError:
             self.get_logger().error(f'Invalid JSON on /admin_task: {msg.data}')
         except Exception as e:
             self.get_logger().error(f'Query error: {e}')
-            out_msg = String()
-            out_msg.data = "I encountered an error processing your question. Please try again."
-            self.speech_publisher.publish(out_msg)
+            self._publish("I encountered an error processing your question. Please try again.")
+
+    def _publish(self, text: str):
+        out_msg = String()
+        out_msg.data = text
+        self.speech_publisher.publish(out_msg)
 
 
 def main(args=None):

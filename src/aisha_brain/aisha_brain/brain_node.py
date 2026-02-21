@@ -17,6 +17,10 @@ class BrainNode(Node):
         self.action_pub = self.create_publisher(String, '/action_request', 10)
         self.speech_pub = self.create_publisher(String, '/robot_speech', 10)
 
+        # Subscribe to robot speech so we can record answers into history
+        self.speech_sub = self.create_subscription(String, '/robot_speech', self._record_answer, 10)
+        self._last_user_input = ''
+
         # Parameters
         self.declare_parameter('ollama_url', 'http://127.0.0.1:11434/api/generate')
         self.declare_parameter('router_model', 'gemma3:270m')
@@ -26,7 +30,7 @@ class BrainNode(Node):
         self.router_model = self.get_parameter('router_model').get_parameter_value().string_value
         self.router_timeout = self.get_parameter('router_timeout').get_parameter_value().integer_value
 
-        # Conversation memory (last 5 exchanges for context)
+        # Conversation memory: stores (user_text, robot_answer) tuples, last 5 exchanges
         self.history = deque(maxlen=5)
 
         # Check Ollama connectivity at startup
@@ -142,13 +146,20 @@ JSON:"""
         msg.data = text
         self.speech_pub.publish(msg)
 
+    def _record_answer(self, msg):
+        """Store the robot's answer paired with the last user input into history."""
+        answer = msg.data.strip()
+        if self._last_user_input and answer:
+            self.history.append((self._last_user_input, answer))
+            self._last_user_input = ''
+
     def listener_callback(self, msg):
         user_input = msg.data.strip()
         if not user_input:
             return
 
         self.get_logger().info(f'Heard: {user_input}')
-        self.history.append(user_input)
+        self._last_user_input = user_input
 
         decision = self.classify_intent(user_input)
         intent = decision.get("intent", "ADMIN")
@@ -156,7 +167,9 @@ JSON:"""
         out_msg = String()
         if intent == "ADMIN":
             self.get_logger().info("Route -> ADMIN (Knowledge Base)")
-            out_msg.data = json.dumps({"details": user_input})
+            # Include recent conversation history so admin_node can handle follow-ups
+            history_list = [{"user": u, "assistant": a} for u, a in self.history]
+            out_msg.data = json.dumps({"details": user_input, "history": history_list})
             self.admin_pub.publish(out_msg)
 
         elif intent == "NAV":
