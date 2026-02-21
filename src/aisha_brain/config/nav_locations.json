@@ -1,0 +1,69 @@
+{
+  "_comment": "Campus navigation waypoints for AI-SHA. Replace x/y values with real ROS2 map coordinates (use rviz2 -> 2D Pose Estimate to find each location). Floor 0 = ground floor.",
+  "reception": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["reception", "front desk", "main entrance", "main office", "secretary"]
+  },
+  "itl_hall": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 1,
+    "aliases": ["ITL", "ITL hall", "testing hall", "computer lab", "exam hall", "integrated testing"]
+  },
+  "swimming_pool": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["pool", "swimming pool", "swimming", "aquatics", "pools"]
+  },
+  "sports_field": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["field", "football field", "sports field", "sports ground", "running track", "track"]
+  },
+  "sports_hall": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["sports hall", "gym", "gymnasium", "indoor sports", "basketball court"]
+  },
+  "clinic": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["clinic", "doctor", "nurse", "medical", "medical room", "sick room"]
+  },
+  "library": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 1,
+    "aliases": ["library", "books", "reading room", "book room"]
+  },
+  "kindergarten": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["KG", "kindergarten", "preschool", "KG building", "KG1", "KG2"]
+  },
+  "cafeteria": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["cafeteria", "canteen", "food", "lunch", "eat"]
+  },
+  "theater": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 0,
+    "aliases": ["theater", "theatre", "auditorium", "hall", "assembly hall"]
+  },
+  "science_labs": {
+    "x": 0.0,
+    "y": 0.0,
+    "floor": 1,
+    "aliases": ["science lab", "lab", "laboratory", "biology lab", "chemistry lab", "physics lab"]
+  }
+}
