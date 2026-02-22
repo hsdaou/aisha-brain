@@ -9,16 +9,25 @@ from collections import deque
 class BrainNode(Node):
     def __init__(self):
         super().__init__('ai_sha_brain')
-        self.subscription = self.create_subscription(String, '/user_speech', self.listener_callback, 10)
 
-        # Publishers
+        # Subscribe to both architecture-standard and local-alias speech topics
+        self.create_subscription(String, '/speech/text', self.listener_callback, 10)   # Jetson architecture
+        self.create_subscription(String, '/user_speech', self.listener_callback, 10)   # local alias / WhatsApp
+
+        # Subscribe to vision detection for context-aware routing
+        self.create_subscription(String, '/detection/objects_simple', self._on_detection, 10)
+        self._last_detection = {}   # most recent detection payload (parsed JSON)
+
+        # Publishers — publish to both standard and alias topics
         self.admin_pub = self.create_publisher(String, '/admin_task', 10)
         self.nav_pub = self.create_publisher(String, '/nav_goal', 10)
         self.action_pub = self.create_publisher(String, '/action_request', 10)
-        self.speech_pub = self.create_publisher(String, '/robot_speech', 10)
+        self.speech_pub = self.create_publisher(String, '/tts_text', 10)       # Jetson architecture
+        self.speech_pub_alias = self.create_publisher(String, '/robot_speech', 10)  # local alias
 
         # Subscribe to robot speech so we can record answers into history
-        self.speech_sub = self.create_subscription(String, '/robot_speech', self._record_answer, 10)
+        self.speech_sub = self.create_subscription(String, '/tts_text', self._record_answer, 10)
+        self.speech_sub_alias = self.create_subscription(String, '/robot_speech', self._record_answer, 10)
         self._last_user_input = ''
 
         # Parameters
@@ -140,11 +149,20 @@ JSON:"""
         self.get_logger().info('Defaulting -> ADMIN')
         return {"intent": "ADMIN"}
 
+    def _on_detection(self, msg):
+        """Receive latest detection context from detection_node (YOLOv8).
+        Stores the parsed payload so routing can use object/gesture context."""
+        try:
+            self._last_detection = json.loads(msg.data)
+        except (json.JSONDecodeError, Exception):
+            self._last_detection = {'raw': msg.data}
+
     def _say(self, text):
-        """Publish a message to TTS for spoken feedback."""
+        """Publish a message to TTS on both standard and alias topics."""
         msg = String()
         msg.data = text
         self.speech_pub.publish(msg)
+        self.speech_pub_alias.publish(msg)
 
     def _record_answer(self, msg):
         """Store the robot's answer paired with the last user input into history."""

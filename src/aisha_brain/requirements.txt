@@ -30,5 +30,10 @@ lxml>=5.0.0
 piper-tts>=1.4.0
 pathvalidate>=3.0.0
 
+# STT (speech-to-text) — Faster-Whisper (CTranslate2 backend)
+# Replaces whisper.cpp. Audio capture uses arecord (ALSA, system package).
+# On Jetson with CUDA: set whisper_device:=cuda and whisper_compute_type:=float16
+faster-whisper>=1.0.0
+
 # Utilities
 setuptools>=68.0.0
