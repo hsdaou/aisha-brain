@@ -1,5 +1,7 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 from std_msgs.msg import String
 import subprocess
 import threading
@@ -41,9 +43,14 @@ class WhatsAppListener(Node):
         # Subscribe to brain's answers to echo them back via WhatsApp
         self.create_subscription(String, '/robot_speech', self._on_robot_speech, 10)
 
-        self.declare_parameter('allowed_number', '971509726902')
+        # Force string type on allowed_number so ROS2 doesn't auto-cast it to INTEGER
+        # when the value is all digits (e.g. '971509726902' from a launch file arg).
+        self.declare_parameter(
+            'allowed_number', '971509726902',
+            ParameterDescriptor(type=ParameterType.PARAMETER_STRING)
+        )
         self.declare_parameter('wa_reply_delay', 0.0)
-        self.declare_parameter('echo_mute_secs', 8.0)  # mute window after each WA send
+        self.declare_parameter('echo_mute_secs', 8.0)
 
         self.allowed_number = self.get_parameter('allowed_number').get_parameter_value().string_value
         self.wa_reply_delay = self.get_parameter('wa_reply_delay').get_parameter_value().double_value
