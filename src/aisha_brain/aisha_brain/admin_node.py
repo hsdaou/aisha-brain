@@ -3,6 +3,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 import json
 import os
+import time
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
@@ -62,6 +63,13 @@ class AdminNode(Node):
         llm_timeout = self.get_parameter('llm_timeout').get_parameter_value().double_value
         similarity_top_k = self.get_parameter('similarity_top_k').get_parameter_value().integer_value
 
+        # ── Deduplication: prevent the same question from being processed twice ──
+        # Identical /admin_task messages within this window are silently dropped.
+        # This guards against duplicate publishes from brain_node's dual subs.
+        self._last_query_text: str = ''
+        self._last_query_time: float = 0.0
+        self._query_debounce_secs: float = 5.0
+
         self.get_logger().info(f'Connecting to Knowledge Base at: {kb_path}')
         self.index = None
         self.embed_model = None
@@ -111,6 +119,18 @@ class AdminNode(Node):
 
             if not user_question:
                 return
+
+            # ── Deduplication ──────────────────────────────────────────────────
+            now = time.time()
+            if (user_question == self._last_query_text and
+                    now - self._last_query_time < self._query_debounce_secs):
+                self.get_logger().warn(
+                    f'Duplicate /admin_task ignored (within {self._query_debounce_secs}s): '
+                    f'{user_question[:60]}'
+                )
+                return
+            self._last_query_text = user_question
+            self._last_query_time = now
 
             self.get_logger().info(f'Query: {user_question}')
             if history:

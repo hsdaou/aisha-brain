@@ -81,6 +81,19 @@ class WhatsAppListener(Node):
         # Echo-loop prevention: timestamp of last outgoing WA send
         self._last_send_time: float = 0.0
 
+        # Incoming deduplication: WhatsApp/Baileys can deliver the same message
+        # twice with different sender JIDs (e.g. phone JID vs linked-device JID).
+        # Track last incoming text+time to drop duplicates within this window.
+        self._last_incoming_text: str = ''
+        self._last_incoming_time: float = 0.0
+        self._incoming_dedup_secs: float = 5.0  # drop same text arriving within 5 s
+
+        # Outgoing deduplication: don't send the same answer text twice within this window.
+        # Guards against multiple admin_node instances publishing identical /robot_speech msgs.
+        self._last_sent_text: str = ''
+        self._last_sent_time: float = 0.0
+        self._reply_dedup_secs: float = 10.0   # suppress duplicate outgoing texts for 10 s
+
         self.get_logger().info(
             f'WhatsApp Listener Online — authorized: {self.allowed_number} | '
             f'auto-reply enabled | echo_mute={self.echo_mute_secs}s'
@@ -152,6 +165,21 @@ class WhatsAppListener(Node):
                             self.get_logger().warn(f'Ignored unauthorized: {sender}')
                             continue
 
+                        # ── Incoming deduplication ──────────────────────────
+                        # Baileys sometimes delivers the same message twice with
+                        # different JIDs (phone number JID vs linked-device JID).
+                        # Drop identical text that arrives within the dedup window.
+                        now = time.time()
+                        if (text == self._last_incoming_text and
+                                now - self._last_incoming_time < self._incoming_dedup_secs):
+                            self.get_logger().warn(
+                                f'Dropped duplicate incoming ({now - self._last_incoming_time:.2f}s): '
+                                f'{text[:60]}'
+                            )
+                            continue
+                        self._last_incoming_text = text
+                        self._last_incoming_time = now
+
                         self.get_logger().info(
                             f'{"[me]" if from_me else "[in]"} {sender}: {text}'
                         )
@@ -201,6 +229,20 @@ class WhatsAppListener(Node):
 
         if not sender_num:
             return  # No WA message received yet (e.g. manual ros2 topic pub)
+
+        # ── Outgoing deduplication ─────────────────────────────────────────────
+        # If multiple admin_node instances publish the same answer to /robot_speech,
+        # only send the first one. Suppress identical text within the dedup window.
+        now = time.time()
+        if (answer == self._last_sent_text and
+                now - self._last_sent_time < self._reply_dedup_secs):
+            self.get_logger().warn(
+                f'Suppressed duplicate outgoing reply ({now - self._last_sent_time:.1f}s ago): '
+                f'{answer[:60]}'
+            )
+            return
+        self._last_sent_text = answer
+        self._last_sent_time = now
 
         recipient = 'me' if from_me else sender_num
 

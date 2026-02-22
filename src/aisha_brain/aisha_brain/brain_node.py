@@ -3,12 +3,19 @@ from rclpy.node import Node
 from std_msgs.msg import String
 import json
 import requests
+import time
 from collections import deque
 
 
 class BrainNode(Node):
     def __init__(self):
         super().__init__('ai_sha_brain')
+
+        # ── Deduplication: ignore identical messages within this window ─────────
+        # /speech/text and /user_speech can both fire for the same WA message.
+        self._last_processed_text: str = ''
+        self._last_processed_time: float = 0.0
+        self._debounce_secs: float = 3.0   # ignore duplicates within 3 s
 
         # ── Input subscriptions ────────────────────────────────────────────────
         # Both topics feed the same callback — /speech/text is the Jetson
@@ -174,6 +181,21 @@ JSON:"""
         user_input = msg.data.strip()
         if not user_input:
             return
+
+        # ── Deduplication ──────────────────────────────────────────────────────
+        # /speech/text and /user_speech can fire for the same incoming message
+        # (e.g. whatsapp_listener → /user_speech, while STT → /speech/text).
+        # Drop identical text that arrives within the debounce window.
+        now = time.time()
+        if (user_input == self._last_processed_text and
+                now - self._last_processed_time < self._debounce_secs):
+            self.get_logger().debug(
+                f'Deduplicated (within {self._debounce_secs}s): {user_input[:60]}'
+            )
+            return
+
+        self._last_processed_text = user_input
+        self._last_processed_time = now
 
         self.get_logger().info(f'Heard: {user_input}')
         self._last_user_input = user_input

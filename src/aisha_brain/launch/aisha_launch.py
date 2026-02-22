@@ -20,16 +20,64 @@ NOTE: To change allowed_number, edit ALLOWED_NUMBER below (or override with
   ros2 launch ... allowed_number:=971XXXXXXXXX — but see comment on that param).
 """
 import launch.conditions
+import subprocess
+import os
+import signal
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # ── Hardcoded defaults (edit here rather than CLI to avoid int-typing bugs) ───
 ALLOWED_NUMBER = '971509726902'   # Authorized WhatsApp number (string, not int)
 
+# ── Node executables to kill on re-launch ─────────────────────────────────────
+_AISHA_EXECUTABLES = [
+    'brain_node', 'admin_node', 'tts_node', 'stt_node',
+    'action_node', 'whatsapp_listener',
+]
+
+
+def _kill_existing_nodes():
+    """Kill any lingering aisha_brain node processes before launching fresh.
+
+    Without this, re-launching without stopping first accumulates zombie
+    instances that all subscribe to the same topics, causing duplicate
+    message processing and multiple WhatsApp replies.
+    """
+    killed = []
+    for proc in subprocess.run(
+        ['pgrep', '-a', '-f', '|'.join(_AISHA_EXECUTABLES)],
+        capture_output=True, text=True
+    ).stdout.splitlines():
+        parts = proc.split(None, 1)
+        if len(parts) < 2:
+            continue
+        pid_str, cmd = parts
+        # Skip ourselves (the launch process)
+        if int(pid_str) == os.getpid():
+            continue
+        try:
+            os.kill(int(pid_str), signal.SIGTERM)
+            killed.append(pid_str)
+        except ProcessLookupError:
+            pass
+    if killed:
+        import time as _time
+        _time.sleep(1.5)   # give processes time to exit cleanly
+        # SIGKILL any survivors
+        for pid_str in killed:
+            try:
+                os.kill(int(pid_str), signal.SIGKILL)
+            except ProcessLookupError:
+                pass   # already gone — good
+        print(f'[aisha_launch] Cleaned up {len(killed)} stale node(s): PIDs {", ".join(killed)}')
+
 
 def generate_launch_description():
+    # Kill any stale instances from a previous launch before starting fresh.
+    # This prevents duplicate subscribers that cause multiple WA replies.
+    _kill_existing_nodes()
 
     # OpaqueFunction lets us read LaunchConfiguration as real Python strings,
     # preventing ROS2 from auto-casting all-digit values to INTEGER in params files.
