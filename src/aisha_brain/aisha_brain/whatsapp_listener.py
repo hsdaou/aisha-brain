@@ -33,9 +33,10 @@ class WhatsAppListener(Node):
         # Publish incoming text for the brain to process
         self.publisher_ = self.create_publisher(String, '/user_speech', 10)
 
-        # Subscribe to the brain's answers so we can echo them back via WhatsApp
+        # Subscribe to the brain's answers so we can echo them back via WhatsApp.
+        # Only /robot_speech — all nodes (admin, brain, action) publish here.
+        # Do NOT also subscribe to /tts_text to avoid double-sending.
         self.create_subscription(String, '/robot_speech', self._on_robot_speech, 10)
-        self.create_subscription(String, '/tts_text',     self._on_robot_speech, 10)
 
         self.declare_parameter('allowed_number', '971509726902')
         self.declare_parameter('wa_reply_delay', 0.0)

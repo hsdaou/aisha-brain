@@ -33,6 +33,7 @@ class AdminNode(Node):
     def __init__(self):
         super().__init__('ai_sha_admin')
         self.subscription = self.create_subscription(String, '/admin_task', self.handle_query, 10)
+        # Publish to /robot_speech — tts_node and whatsapp_listener both subscribe here
         self.speech_publisher = self.create_publisher(String, '/robot_speech', 10)
 
         # Resolve KB path via ament_index so it works regardless of where

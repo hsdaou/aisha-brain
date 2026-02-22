@@ -158,11 +158,12 @@ JSON:"""
             self._last_detection = {'raw': msg.data}
 
     def _say(self, text):
-        """Publish a message to TTS on both standard and alias topics."""
+        """Publish to /robot_speech — the canonical output bus.
+        tts_node and whatsapp_listener both subscribe there.
+        Publishing to both /tts_text and /robot_speech would cause double WA replies."""
         msg = String()
         msg.data = text
-        self.speech_pub.publish(msg)
-        self.speech_pub_alias.publish(msg)
+        self.speech_pub_alias.publish(msg)   # /robot_speech
 
     def _record_answer(self, msg):
         """Store the robot's answer paired with the last user input into history."""
