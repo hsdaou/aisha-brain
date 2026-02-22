@@ -10,42 +10,48 @@ class BrainNode(Node):
     def __init__(self):
         super().__init__('ai_sha_brain')
 
-        # Subscribe to both architecture-standard and local-alias speech topics
-        self.create_subscription(String, '/speech/text', self.listener_callback, 10)   # Jetson architecture
-        self.create_subscription(String, '/user_speech', self.listener_callback, 10)   # local alias / WhatsApp
+        # ── Input subscriptions ────────────────────────────────────────────────
+        # Both topics feed the same callback — /speech/text is the Jetson
+        # architecture standard; /user_speech is the local alias used by
+        # whatsapp_listener and manual ros2 topic pub testing.
+        self.create_subscription(String, '/speech/text', self.listener_callback, 10)
+        self.create_subscription(String, '/user_speech', self.listener_callback, 10)
 
-        # Subscribe to vision detection for context-aware routing
+        # Vision context from detection_node (YOLOv8) — stored for future routing
         self.create_subscription(String, '/detection/objects_simple', self._on_detection, 10)
-        self._last_detection = {}   # most recent detection payload (parsed JSON)
+        self._last_detection = {}
 
-        # Publishers — publish to both standard and alias topics
-        self.admin_pub = self.create_publisher(String, '/admin_task', 10)
-        self.nav_pub = self.create_publisher(String, '/nav_goal', 10)
+        # ── Output publishers ──────────────────────────────────────────────────
+        self.admin_pub  = self.create_publisher(String, '/admin_task', 10)
+        self.nav_pub    = self.create_publisher(String, '/nav_goal', 10)
         self.action_pub = self.create_publisher(String, '/action_request', 10)
-        self.speech_pub = self.create_publisher(String, '/tts_text', 10)       # Jetson architecture
-        self.speech_pub_alias = self.create_publisher(String, '/robot_speech', 10)  # local alias
+        # Single canonical speech output bus — tts_node and whatsapp_listener
+        # both subscribe to /robot_speech. Do NOT also publish to /tts_text to
+        # avoid double-processing by whatsapp_listener.
+        self.speech_pub = self.create_publisher(String, '/robot_speech', 10)
 
-        # Subscribe to robot speech so we can record answers into history
-        self.speech_sub = self.create_subscription(String, '/tts_text', self._record_answer, 10)
-        self.speech_sub_alias = self.create_subscription(String, '/robot_speech', self._record_answer, 10)
+        # ── History: record (user, answer) pairs for follow-up context ─────────
+        # Subscribe to /robot_speech to capture what the brain outputs.
+        # Use a deduplication flag so we only record once per answer.
+        self._history_sub = self.create_subscription(
+            String, '/robot_speech', self._record_answer, 10
+        )
         self._last_user_input = ''
+        self.history = deque(maxlen=5)   # (user_text, robot_answer) tuples
 
-        # Parameters
+        # ── Parameters ────────────────────────────────────────────────────────
         self.declare_parameter('ollama_url', 'http://127.0.0.1:11434/api/generate')
         self.declare_parameter('router_model', 'gemma3:270m')
         self.declare_parameter('router_timeout', 30)
 
-        self.ollama_url = self.get_parameter('ollama_url').get_parameter_value().string_value
-        self.router_model = self.get_parameter('router_model').get_parameter_value().string_value
+        self.ollama_url     = self.get_parameter('ollama_url').get_parameter_value().string_value
+        self.router_model   = self.get_parameter('router_model').get_parameter_value().string_value
         self.router_timeout = self.get_parameter('router_timeout').get_parameter_value().integer_value
 
-        # Conversation memory: stores (user_text, robot_answer) tuples, last 5 exchanges
-        self.history = deque(maxlen=5)
-
-        # Check Ollama connectivity at startup
         self._check_ollama()
-
         self.get_logger().info('AI-SHA Brain: Router Active')
+
+    # ── Startup ────────────────────────────────────────────────────────────────
 
     def _check_ollama(self):
         try:
@@ -59,20 +65,17 @@ class BrainNode(Node):
             else:
                 self.get_logger().info(f'Ollama OK. Model: {self.router_model}')
         except Exception as e:
-            self.get_logger().error(f'Ollama unreachable at {self.ollama_url}: {e}')
+            self.get_logger().error(f'Ollama unreachable: {e}')
+
+    # ── Intent classification ──────────────────────────────────────────────────
 
     def classify_intent(self, text):
-        """Keyword-first routing: fast, deterministic, works on any hardware.
-        Falls back to LLM only for ambiguous inputs."""
         keyword_result = self._keyword_classify(text)
         if keyword_result is not None:
             return keyword_result
-
-        # Ambiguous input — use LLM
         return self._llm_classify(text)
 
     def _keyword_classify(self, text):
-        """Fast deterministic classification using keyword patterns."""
         text_lower = text.lower()
 
         nav_keywords = [
@@ -95,7 +98,6 @@ class BrainNode(Node):
                 self.get_logger().info(f'Keyword match "{kw}" -> ACTION')
                 return {"intent": "ACTION"}
 
-        # Questions are almost always ADMIN
         if text.rstrip().endswith('?'):
             self.get_logger().info('Question mark detected -> ADMIN')
             return {"intent": "ADMIN"}
@@ -110,11 +112,9 @@ class BrainNode(Node):
                 self.get_logger().info(f'Question pattern "{qs}" -> ADMIN')
                 return {"intent": "ADMIN"}
 
-        # No confident match — return None to trigger LLM
         return None
 
     def _llm_classify(self, text):
-        """LLM-based classification for ambiguous inputs."""
         prompt = f"""Classify this school robot request into exactly one: ADMIN, NAV, or ACTION.
 
 ADMIN = questions about school info, fees, schedule, academics, facilities
@@ -123,7 +123,6 @@ ACTION = send message, whatsapp, call, email, reminder
 
 "{text}"
 JSON:"""
-
         try:
             r = requests.post(self.ollama_url, json={
                 "model": self.router_model,
@@ -145,32 +144,31 @@ JSON:"""
         except (json.JSONDecodeError, KeyError) as e:
             self.get_logger().error(f'Failed to parse LLM response: {e}')
 
-        # Final fallback
         self.get_logger().info('Defaulting -> ADMIN')
         return {"intent": "ADMIN"}
 
+    # ── Helpers ────────────────────────────────────────────────────────────────
+
     def _on_detection(self, msg):
-        """Receive latest detection context from detection_node (YOLOv8).
-        Stores the parsed payload so routing can use object/gesture context."""
         try:
             self._last_detection = json.loads(msg.data)
-        except (json.JSONDecodeError, Exception):
+        except Exception:
             self._last_detection = {'raw': msg.data}
 
     def _say(self, text):
-        """Publish to /robot_speech — the canonical output bus.
-        tts_node and whatsapp_listener both subscribe there.
-        Publishing to both /tts_text and /robot_speech would cause double WA replies."""
+        """Publish direct brain responses to /robot_speech."""
         msg = String()
         msg.data = text
-        self.speech_pub_alias.publish(msg)   # /robot_speech
+        self.speech_pub.publish(msg)
 
     def _record_answer(self, msg):
-        """Store the robot's answer paired with the last user input into history."""
+        """Record answer into history when brain sees /robot_speech."""
         answer = msg.data.strip()
         if self._last_user_input and answer:
             self.history.append((self._last_user_input, answer))
-            self._last_user_input = ''
+            self._last_user_input = ''   # clear so next message starts fresh
+
+    # ── Main routing callback ──────────────────────────────────────────────────
 
     def listener_callback(self, msg):
         user_input = msg.data.strip()
@@ -186,7 +184,6 @@ JSON:"""
         out_msg = String()
         if intent == "ADMIN":
             self.get_logger().info("Route -> ADMIN (Knowledge Base)")
-            # Include recent conversation history so admin_node can handle follow-ups
             history_list = [{"user": u, "assistant": a} for u, a in self.history]
             out_msg.data = json.dumps({"details": user_input, "history": history_list})
             self.admin_pub.publish(out_msg)

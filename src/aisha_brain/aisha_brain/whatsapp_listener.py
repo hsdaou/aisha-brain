@@ -19,12 +19,17 @@ class WhatsAppListener(Node):
 
     The node tracks the JID of the last sender so it can route the brain's
     answer back to them via WhatsApp. Both TTS output (/robot_speech) and
-    the WhatsApp reply happen in parallel — the brain's answer goes to the
-    speaker AND back to the user's phone.
+    the WhatsApp reply happen in parallel.
+
+    Runaway-loop prevention:
+      When the bot sends a WA reply, wa_listener.js sees it as a new
+      incoming message with fromMe=True. We suppress those echoes by
+      setting _mute_incoming for a short window after each send.
 
     Parameters:
-      allowed_number  (str)  Authorized sender phone number digits, e.g. '971509726902'
-      wa_reply_delay  (float) Seconds to wait before sending reply (0 = immediate)
+      allowed_number  (str)   Authorized sender phone number digits
+      wa_reply_delay  (float) Seconds to wait before sending WA reply (0 = immediate)
+      echo_mute_secs  (float) Seconds to mute incoming fromMe messages after a send
     """
 
     def __init__(self):
@@ -33,18 +38,18 @@ class WhatsAppListener(Node):
         # Publish incoming text for the brain to process
         self.publisher_ = self.create_publisher(String, '/user_speech', 10)
 
-        # Subscribe to the brain's answers so we can echo them back via WhatsApp.
-        # Only /robot_speech — all nodes (admin, brain, action) publish here.
-        # Do NOT also subscribe to /tts_text to avoid double-sending.
+        # Subscribe to brain's answers to echo them back via WhatsApp
         self.create_subscription(String, '/robot_speech', self._on_robot_speech, 10)
 
         self.declare_parameter('allowed_number', '971509726902')
         self.declare_parameter('wa_reply_delay', 0.0)
+        self.declare_parameter('echo_mute_secs', 8.0)  # mute window after each WA send
 
         self.allowed_number = self.get_parameter('allowed_number').get_parameter_value().string_value
         self.wa_reply_delay = self.get_parameter('wa_reply_delay').get_parameter_value().double_value
+        self.echo_mute_secs = self.get_parameter('echo_mute_secs').get_parameter_value().double_value
 
-        # Resolve wa_listener.js — try ament share dir first, then source dir
+        # Resolve wa_listener.js
         try:
             from ament_index_python.packages import get_package_share_directory
             self._listener_script = os.path.join(
@@ -61,25 +66,25 @@ class WhatsAppListener(Node):
         self._msg_queue = queue.SimpleQueue()
         self._publish_timer = self.create_timer(0.1, self._publish_pending)
 
-        # Track who sent the last authorized message so we can reply to them.
-        # Also track the raw JID for mudslide (which needs the full JID or number).
-        self._last_sender_jid: str = ''   # full JID as received, e.g. '971509726902@s.whatsapp.net'
-        self._last_sender_num: str = ''   # digits-only portion, e.g. '971509726902'
-        self._last_from_me: bool = False  # True when the owner sent from their own phone
+        # Sender tracking (protected by lock)
+        self._last_sender_num: str = ''  # digits-only, e.g. '971509726902'
+        self._last_from_me: bool = False
         self._reply_lock = threading.Lock()
+
+        # Echo-loop prevention: timestamp of last outgoing WA send
+        self._last_send_time: float = 0.0
 
         self.get_logger().info(
             f'WhatsApp Listener Online — authorized: {self.allowed_number} | '
-            f'auto-reply: enabled'
+            f'auto-reply enabled | echo_mute={self.echo_mute_secs}s'
         )
 
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
-    # ── Publish pending speech-to-brain messages ──────────────────────────────
+    # ── Incoming pipeline ─────────────────────────────────────────────────────
 
     def _publish_pending(self):
-        """Drain the queue from the main executor thread (thread-safe publish)."""
         while not self._msg_queue.empty():
             try:
                 text = self._msg_queue.get_nowait()
@@ -89,14 +94,10 @@ class WhatsAppListener(Node):
             except queue.Empty:
                 break
 
-    # ── Incoming WhatsApp messages ─────────────────────────────────────────────
-
     def _monitor_loop(self):
-        """Run wa_listener.js and parse its JSON-line output."""
         if not os.path.exists(self._listener_script):
             self.get_logger().error(
-                f'wa_listener.js not found at {self._listener_script}. '
-                'WhatsApp listener cannot start.'
+                f'wa_listener.js not found at {self._listener_script}.'
             )
             return
 
@@ -127,24 +128,35 @@ class WhatsAppListener(Node):
                         if not text:
                             continue
 
-                        # Accept messages sent by the device owner (fromMe=True)
-                        # OR received from the configured allowed number.
-                        if from_me or self.allowed_number in sender:
-                            self.get_logger().info(
-                                f'{"[me]" if from_me else "[in]"} {sender}: {text}'
-                            )
-                            # Remember who to reply to
-                            with self._reply_lock:
-                                self._last_sender_jid = sender
-                                self._last_sender_num = sender.split('@')[0] if '@' in sender else sender
-                                self._last_from_me = from_me
+                        # ── Echo-loop prevention ────────────────────────────
+                        # After we send a WA reply, wa_listener.js echoes it
+                        # back as fromMe=True. Suppress those echoes.
+                        if from_me:
+                            secs_since_send = time.time() - self._last_send_time
+                            if secs_since_send < self.echo_mute_secs:
+                                self.get_logger().debug(
+                                    f'Suppressed fromMe echo ({secs_since_send:.1f}s after send)'
+                                )
+                                continue
 
-                            self._msg_queue.put(text)
-                        else:
-                            self.get_logger().warn(f'Ignored message from unauthorized: {sender}')
+                        # ── Authorization check ─────────────────────────────
+                        is_authorized = from_me or (self.allowed_number in sender)
+                        if not is_authorized:
+                            self.get_logger().warn(f'Ignored unauthorized: {sender}')
+                            continue
+
+                        self.get_logger().info(
+                            f'{"[me]" if from_me else "[in]"} {sender}: {text}'
+                        )
+
+                        with self._reply_lock:
+                            self._last_sender_num = sender.split('@')[0] if '@' in sender else sender
+                            self._last_from_me = from_me
+
+                        self._msg_queue.put(text)
 
                     except json.JSONDecodeError:
-                        self.get_logger().warn(f'Unexpected output from wa_listener.js: {line}')
+                        self.get_logger().warn(f'Unexpected wa_listener output: {line}')
 
                 process.wait()
                 if rclpy.ok():
@@ -159,7 +171,6 @@ class WhatsAppListener(Node):
                 time.sleep(5)
 
     def _log_stderr(self, process):
-        """Forward wa_listener.js stderr to ROS2 logger."""
         for line in process.stderr:
             line = line.strip()
             if not line:
@@ -169,10 +180,10 @@ class WhatsAppListener(Node):
             else:
                 self.get_logger().info(f'[wa_listener] {line}')
 
-    # ── Outgoing WhatsApp reply ───────────────────────────────────────────────
+    # ── Outgoing reply ────────────────────────────────────────────────────────
 
     def _on_robot_speech(self, msg: String):
-        """Called whenever the brain publishes an answer. Send it back via WhatsApp."""
+        """Send the brain's answer back to the WhatsApp sender."""
         answer = msg.data.strip()
         if not answer:
             return
@@ -182,17 +193,10 @@ class WhatsAppListener(Node):
             from_me = self._last_from_me
 
         if not sender_num:
-            # No incoming WA message yet — skip (e.g. a manual ros2 topic pub)
-            return
+            return  # No WA message received yet (e.g. manual ros2 topic pub)
 
-        # When the message came from the owner's own phone, reply to them (self).
-        # mudslide accepts "me" as shorthand for the linked account.
-        if from_me:
-            recipient = 'me'
-        else:
-            recipient = sender_num
+        recipient = 'me' if from_me else sender_num
 
-        # Optional small delay (e.g. 0.5s) to let TTS start first
         if self.wa_reply_delay > 0:
             time.sleep(self.wa_reply_delay)
 
@@ -203,9 +207,13 @@ class WhatsAppListener(Node):
         ).start()
 
     def _send_whatsapp(self, recipient: str, message: str):
-        """Send a WhatsApp message in a background thread (non-blocking)."""
         try:
-            self.get_logger().info(f'WA reply → {recipient}: {message[:80]}...' if len(message) > 80 else f'WA reply → {recipient}: {message}')
+            short = message[:80] + '...' if len(message) > 80 else message
+            self.get_logger().info(f'WA reply → {recipient}: {short}')
+
+            # Record send time BEFORE sending so the mute window starts immediately
+            self._last_send_time = time.time()
+
             result = subprocess.run(
                 ['npx', 'mudslide', 'send', recipient, message],
                 capture_output=True, text=True, timeout=30
@@ -217,7 +225,7 @@ class WhatsAppListener(Node):
         except subprocess.TimeoutExpired:
             self.get_logger().error('WA reply timed out')
         except FileNotFoundError:
-            self.get_logger().error('npx/mudslide not found — cannot send WA reply')
+            self.get_logger().error('npx/mudslide not found')
         except Exception as e:
             self.get_logger().error(f'WA reply error: {e}')
 
