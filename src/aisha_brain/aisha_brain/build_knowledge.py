@@ -189,8 +189,8 @@ def build_index():
     try:
         db.delete_collection('school_info')
         print('Cleared old knowledge base.')
-    except ValueError:
-        pass
+    except Exception:
+        pass  # Collection may not exist yet (fresh build)
 
     chroma_collection = db.get_or_create_collection('school_info')
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
