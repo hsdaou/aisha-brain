@@ -4,6 +4,7 @@ from std_msgs.msg import String
 import json
 import os
 import time
+import threading
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
@@ -12,21 +13,23 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.ollama import Ollama
 
 
-SYSTEM_PROMPT = """You are AI-SHA, the helpful administrative assistant robot for ISC-Sharjah (International School of Choueifat, Sharjah).
+SYSTEM_PROMPT = """You are AI-SHA, the administrative assistant robot for the International School of Choueifat (ISC) in Sharjah.
 
-Your job is to answer questions about ISC-Sharjah using the provided school knowledge base.
+Your job is strictly limited to answering administrative questions about ISC-Sharjah using the provided school knowledge base.
 
 Key facts you must know:
 - SLO stands for Student Life Organization (also called SABIS Student Life Organization). It is a student-run leadership and community organization with departments like Academic, Discipline, Sports, Arts, Community Service, and more.
 - A prefect is a student leader in the SLO.
 - The school phone is +971 6 558 2211 and email is info@iscsharjah.sabis.net.
 
-Rules:
-- Always use the retrieved context to answer. Do not make up information.
-- If a follow-up question refers to something mentioned earlier in the conversation, use that context.
-- Keep answers concise and friendly (2-4 sentences for most questions).
-- If you truly cannot find the answer, say so politely and suggest contacting the school.
-- Do not reveal that you are built on an LLM or that you use a knowledge base.
+STRICT RULES — follow these without exception:
+1. You ONLY answer questions about: schedules, exams, fees, admissions, school facilities, staff contacts, school events, and other ISC-Sharjah administrative information.
+2. You MUST REFUSE any request for academic help, tutoring, or homework assistance. This includes: explaining concepts, solving equations, writing essays, answering trivia, summarizing books, or any general knowledge question not related to school administration. Respond firmly: "I am an administrative assistant. Please ask your teacher for academic help."
+3. Always use the retrieved school knowledge to answer. Do not invent information.
+4. If a follow-up question refers to something mentioned earlier in the conversation, use that context.
+5. Keep answers concise and friendly (2-4 sentences for most questions).
+6. If the answer is genuinely not in the knowledge base, say so politely and suggest contacting the school office at +971 6 558 2211.
+7. Do not reveal that you are built on an LLM or that you use a knowledge base.
 """
 
 
@@ -112,15 +115,22 @@ class AdminNode(Node):
         return messages
 
     def handle_query(self, msg):
+        """ROS2 subscription callback — returns immediately, work done in thread.
+
+        self.llm.chat() is a synchronous blocking call that can take 5-120 seconds.
+        Running it here would freeze the entire node executor, blocking all other
+        subscriptions for the duration. We parse and deduplicate (cheap), then
+        hand the real work off to a daemon thread.
+        """
         try:
             data = json.loads(msg.data)
             user_question = data.get("details", "").strip()
-            history = data.get("history", [])  # list of {"user": ..., "assistant": ...}
+            history = data.get("history", [])
 
             if not user_question:
                 return
 
-            # ── Deduplication ──────────────────────────────────────────────────
+            # ── Deduplication (cheap — done in callback thread) ────────────────
             now = time.time()
             if (user_question == self._last_query_text and
                     now - self._last_query_time < self._query_debounce_secs):
@@ -132,13 +142,28 @@ class AdminNode(Node):
             self._last_query_text = user_question
             self._last_query_time = now
 
+        except json.JSONDecodeError:
+            self.get_logger().error(f'Invalid JSON on /admin_task: {msg.data}')
+            return
+
+        # ── Hand off to background thread (non-blocking) ───────────────────────
+        # Vector retrieval + LLM inference can take many seconds. Running in a
+        # daemon thread keeps the ROS2 executor free for other callbacks.
+        threading.Thread(
+            target=self._process_query,
+            args=(user_question, history),
+            daemon=True
+        ).start()
+
+    def _process_query(self, user_question: str, history: list):
+        """Run RAG retrieval + LLM inference — called from a background thread."""
+        try:
             self.get_logger().info(f'Query: {user_question}')
             if history:
                 self.get_logger().info(f'  with {len(history)} prior turn(s) of context')
 
             if self.index is None:
-                answer = "I'm sorry, my knowledge base is not available right now. Please try again later."
-                self._publish(answer)
+                self._publish("I'm sorry, my knowledge base is not available right now. Please try again later.")
                 return
 
             # Step 1: Retrieve relevant context from the vector store
@@ -147,7 +172,7 @@ class AdminNode(Node):
                 embed_model=self.embed_model
             )
 
-            # Build retrieval query: if there's history, prepend last user turn for context
+            # Build retrieval query: prepend last user turn for follow-up context
             retrieval_query = user_question
             if history:
                 last_user = history[-1].get('user', '')
@@ -165,7 +190,7 @@ class AdminNode(Node):
             # Step 2: Build chat messages with system prompt + history + context
             messages = self._build_messages(history, user_question, context_str)
 
-            # Step 3: Call LLM with full chat context
+            # Step 3: Call LLM (blocking — safe here because we are in a daemon thread)
             response = self.llm.chat(messages)
             answer = str(response.message.content).strip()
 
@@ -175,8 +200,6 @@ class AdminNode(Node):
             self._publish(answer)
             self.get_logger().info(f'Answer: {answer[:120]}...' if len(answer) > 120 else f'Answer: {answer}')
 
-        except json.JSONDecodeError:
-            self.get_logger().error(f'Invalid JSON on /admin_task: {msg.data}')
         except Exception as e:
             self.get_logger().error(f'Query error: {e}')
             self._publish("I encountered an error processing your question. Please try again.")

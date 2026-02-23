@@ -4,6 +4,7 @@ from std_msgs.msg import String
 import json
 import requests
 import time
+import threading
 from collections import deque
 
 
@@ -178,14 +179,17 @@ JSON:"""
     # ── Main routing callback ──────────────────────────────────────────────────
 
     def listener_callback(self, msg):
+        """ROS2 subscription callback — returns immediately, work done in thread.
+
+        Blocking the executor here (e.g. with requests.post to Ollama) would
+        freeze ALL subscriptions on this node for the duration of the LLM call.
+        We deduplicate synchronously (cheap), then hand off to a daemon thread.
+        """
         user_input = msg.data.strip()
         if not user_input:
             return
 
-        # ── Deduplication ──────────────────────────────────────────────────────
-        # /speech/text and /user_speech can fire for the same incoming message
-        # (e.g. whatsapp_listener → /user_speech, while STT → /speech/text).
-        # Drop identical text that arrives within the debounce window.
+        # ── Deduplication (cheap — done in callback thread) ────────────────────
         now = time.time()
         if (user_input == self._last_processed_text and
                 now - self._last_processed_time < self._debounce_secs):
@@ -197,6 +201,18 @@ JSON:"""
         self._last_processed_text = user_input
         self._last_processed_time = now
 
+        # ── Hand off to background thread (non-blocking) ───────────────────────
+        # classify_intent() may call requests.post(Ollama) which can take
+        # several seconds. Running it in a daemon thread keeps the ROS2
+        # executor free to handle other callbacks (STT, WhatsApp, vision, etc.)
+        threading.Thread(
+            target=self._route,
+            args=(user_input,),
+            daemon=True
+        ).start()
+
+    def _route(self, user_input: str):
+        """Classify intent and publish — runs in a background daemon thread."""
         self.get_logger().info(f'Heard: {user_input}')
         self._last_user_input = user_input
 
