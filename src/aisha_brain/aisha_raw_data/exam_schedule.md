@@ -1,33 +1,71 @@
 # Exam Schedule — ISC Sharjah (Term 3, 2025-2026)
 
-## Monday, 02 March 2026
+This document lists the officially announced exam dates for Term 3, 2025-2026.
+Only the exams listed below have been announced. If a grade or subject is not listed here, no exam date has been announced for it yet.
 
-At the International School of Choueifat, on Monday 02 Mar. 2026, students in Grade 3 UAE / Grade 4 GULF SDP have the following exams: 9:00 - 9:45 English Unseen Comprehension, and 9:45 - 10:15 Computing.
+---
 
-At the International School of Choueifat, on Monday 02 Mar. 2026, students in Grade 2 UAE / Grade 3 GULF SDP have the following exams: 10:30 - 11:15 English Unseen Comprehension, and 11:15 - 11:45 Computing.
+## Monday, 02 March 2026 — Exam Entries
 
-At the International School of Choueifat, on Monday 02 Mar. 2026, students in Grade 11S UAE have the following exam: 9:00 - 10:20 Periodic.
+### Grade 3 UAE / Grade 4 GULF SDP — Monday 02 March 2026
+On Monday 02 March 2026, Grade 3 UAE / Grade 4 GULF SDP students have: English Unseen Comprehension from 9:00 to 9:45, and Computing from 9:45 to 10:15.
 
-At the International School of Choueifat, on Monday 02 Mar. 2026, students in Grade 11L UAE have the following exam: 9:00 - 10:20 Periodic.
+### Grade 2 UAE / Grade 3 GULF SDP — Monday 02 March 2026
+On Monday 02 March 2026, Grade 2 UAE / Grade 3 GULF SDP students have: English Unseen Comprehension from 10:30 to 11:15, and Computing from 11:15 to 11:45.
 
-At the International School of Choueifat, on Monday 02 Mar. 2026, students in Grade 12S have the following exam: 9:00 - 10:20 Periodic.
+### Grade 11S UAE — Monday 02 March 2026
+On Monday 02 March 2026, Grade 11S UAE students have: Periodic exam from 9:00 to 10:20.
 
-At the International School of Choueifat, on Monday 02 Mar. 2026, students in Grade 12L have the following exam: 9:00 - 10:20 Periodic.
+### Grade 11L UAE — Monday 02 March 2026
+On Monday 02 March 2026, Grade 11L UAE students have: Periodic exam from 9:00 to 10:20.
 
-## Thursday, 12 March 2026
+### Grade 12S — Monday 02 March 2026
+On Monday 02 March 2026, Grade 12S students have: Periodic exam from 9:00 to 10:20.
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 3 UAE / Grade 4 GULF SDP have the following exam: 9:00 - 10:00 Social Studies.
+### Grade 12L — Monday 02 March 2026
+On Monday 02 March 2026, Grade 12L students have: Periodic exam from 9:00 to 10:20.
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 5 UAE / Grade 6 GULF have the following exam: 9:00 - 9:45 Social Studies.
+---
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 7 UAE / Grade 8 GULF have the following exam: 9:00 - 9:45 Supplementary Reader.
+## Thursday, 12 March 2026 — Exam Entries
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 2 UAE / Grade 3 GULF SDP have the following exam: 10:30 - 11:30 Social Studies.
+### Grade 3 UAE / Grade 4 GULF SDP — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 3 UAE / Grade 4 GULF SDP students have: Social Studies exam from 9:00 to 10:00.
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 8 UAE / Grade 9 GULF have the following exam: 10:40 - 11:40 English.
+### Grade 5 UAE / Grade 6 GULF — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 5 UAE / Grade 6 GULF students have: Social Studies exam from 9:00 to 9:45.
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 9S UAE / Grade 10S GULF have the following exam: 10:40 - 11:40 English.
+### Grade 7 UAE / Grade 8 GULF — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 7 UAE / Grade 8 GULF students have: Supplementary Reader exam from 9:00 to 9:45.
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 11S UAE have the following exam: 12:55 - 1:30 AMS Period 7.
+### Grade 2 UAE / Grade 3 GULF SDP — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 2 UAE / Grade 3 GULF SDP students have: Social Studies exam from 10:30 to 11:30.
 
-At the International School of Choueifat, on Thursday 12 Mar. 2026, students in Grade 12L have the following exam: 12:55 - 1:30 AMS Period 7.
+### Grade 8 UAE / Grade 9 GULF — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 8 UAE / Grade 9 GULF students have: English exam from 10:40 to 11:40.
+
+### Grade 9S UAE / Grade 10S GULF — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 9S UAE / Grade 10S GULF students have: English exam from 10:40 to 11:40.
+
+### Grade 11S UAE — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 11S UAE students have: AMS Period 7 exam from 12:55 to 1:30.
+
+### Grade 12L — Thursday 12 March 2026
+On Thursday 12 March 2026, Grade 12L students have: AMS Period 7 exam from 12:55 to 1:30.
+
+---
+
+## Summary of Announced Exams by Grade
+
+- **Grade 2 UAE / Grade 3 GULF SDP**: English Unseen Comprehension (Mon 02 Mar), Computing (Mon 02 Mar), Social Studies (Thu 12 Mar)
+- **Grade 3 UAE / Grade 4 GULF SDP**: English Unseen Comprehension (Mon 02 Mar), Computing (Mon 02 Mar), Social Studies (Thu 12 Mar)
+- **Grade 5 UAE / Grade 6 GULF**: Social Studies (Thu 12 Mar) — this is the only announced exam for this grade group
+- **Grade 7 UAE / Grade 8 GULF**: Supplementary Reader (Thu 12 Mar) — this is the only announced exam for this grade group
+- **Grade 8 UAE / Grade 9 GULF**: English (Thu 12 Mar) — this is the only announced exam for this grade group
+- **Grade 9S UAE / Grade 10S GULF**: English (Thu 12 Mar) — this is the only announced exam for this grade group
+- **Grade 11S UAE**: Periodic (Mon 02 Mar), AMS Period 7 (Thu 12 Mar)
+- **Grade 11L UAE**: Periodic (Mon 02 Mar)
+- **Grade 12S**: Periodic (Mon 02 Mar)
+- **Grade 12L**: Periodic (Mon 02 Mar), AMS Period 7 (Thu 12 Mar)
+
+Note: Grades not listed above (e.g. Grade 1, Grade 4 UAE, Grade 6 UAE, Grade 10 UAE, Grade 13) have no announced exams in this schedule. Math, Science, Arabic and other subjects are not listed because no exam dates have been announced for those subjects yet.

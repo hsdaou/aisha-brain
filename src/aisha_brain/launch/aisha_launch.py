@@ -74,10 +74,66 @@ def _kill_existing_nodes():
         print(f'[aisha_launch] Cleaned up {len(killed)} stale node(s): PIDs {", ".join(killed)}')
 
 
+def _sync_knowledge_base():
+    """Sync the source-tree knowledge base into the installed share directory.
+
+    colcon copies ChromaDB binary files at build time, but build_knowledge.py
+    is typically run AFTER colcon build (it requires the venv + model download).
+    This means the installed KB can lag behind the source KB.
+
+    We sync at launch time so the running nodes always get the latest vectors,
+    without needing a full colcon rebuild after every KB update.
+    """
+    import shutil
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        install_kb = os.path.join(
+            get_package_share_directory('aisha_brain'), 'aisha_knowledge_db'
+        )
+    except Exception:
+        return  # Not in a colcon workspace — nothing to sync
+
+    # Locate the source KB relative to this launch file:
+    # launch/ -> package root -> aisha_knowledge_db/
+    src_kb = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'aisha_knowledge_db'
+    )
+    if not os.path.isdir(src_kb):
+        print(f'[aisha_launch] WARNING: source KB not found at {src_kb}. '
+              'Run build_knowledge.py first.')
+        return
+
+    # Compare chunk counts to decide if a sync is needed
+    try:
+        import chromadb as _cdb
+        src_count = _cdb.PersistentClient(path=src_kb).get_collection('school_info').count()
+        try:
+            dst_count = _cdb.PersistentClient(path=install_kb).get_collection('school_info').count()
+        except Exception:
+            dst_count = -1
+
+        if src_count != dst_count:
+            print(f'[aisha_launch] KB mismatch (src={src_count} chunks, '
+                  f'install={dst_count} chunks) — syncing...')
+            if os.path.exists(install_kb):
+                shutil.rmtree(install_kb)
+            shutil.copytree(src_kb, install_kb)
+            print(f'[aisha_launch] KB synced: {src_count} chunks → {install_kb}')
+        else:
+            print(f'[aisha_launch] KB up to date ({src_count} chunks).')
+    except Exception as e:
+        print(f'[aisha_launch] KB sync skipped: {e}')
+
+
 def generate_launch_description():
     # Kill any stale instances from a previous launch before starting fresh.
     # This prevents duplicate subscribers that cause multiple WA replies.
     _kill_existing_nodes()
+
+    # Sync knowledge base from source tree to install tree if chunk counts differ.
+    # Ensures the LLM always gets the latest vectors without a full colcon rebuild.
+    _sync_knowledge_base()
 
     # OpaqueFunction lets us read LaunchConfiguration as real Python strings,
     # preventing ROS2 from auto-casting all-digit values to INTEGER in params files.

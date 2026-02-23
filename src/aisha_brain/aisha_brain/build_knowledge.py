@@ -179,6 +179,7 @@ def scrape_and_save():
 def build_index():
     """Ingest all files in DATA_FOLDER into a ChromaDB vector store."""
     from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, StorageContext
+    from llama_index.core.node_parser import SentenceSplitter
     from llama_index.vector_stores.chroma import ChromaVectorStore
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     import chromadb
@@ -199,12 +200,18 @@ def build_index():
     embed_model = HuggingFaceEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')
     documents = SimpleDirectoryReader(DATA_FOLDER).load_data()
 
+    # Use a small chunk size so each grade-entry / calendar section gets
+    # its own embedding vector for precise retrieval.
+    # chunk_size=256 tokens ≈ 2-3 sentences; overlap=32 preserves context.
+    splitter = SentenceSplitter(chunk_size=256, chunk_overlap=32)
+
     VectorStoreIndex.from_documents(
         documents,
         storage_context=storage_context,
         embed_model=embed_model,
+        transformations=[splitter],
     )
-    print(f'Indexed {len(documents)} documents. Knowledge base saved to {CHROMA_PATH}')
+    print(f'Indexed {len(documents)} source documents. Knowledge base saved to {CHROMA_PATH}')
 
 
 if __name__ == '__main__':
