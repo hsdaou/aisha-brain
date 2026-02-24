@@ -171,7 +171,7 @@ def generate_launch_description():
                     'ollama_url': 'http://127.0.0.1:11434',
                     'llm_model': context.perform_substitution(LaunchConfiguration('llm_model')),
                     'llm_timeout': 120.0,
-                    'similarity_top_k': 6,
+                    'similarity_top_k': 15,
                 }]
             ),
 
