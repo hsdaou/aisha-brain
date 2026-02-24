@@ -262,7 +262,10 @@ class WhatsAppListener(Node):
         self._last_sent_text = answer
         self._last_sent_time = now
 
-        recipient = 'me' if from_me else sender_num
+        # Always reply to the chat JID (sender_num = msg.key.remoteJid).
+        # Previously used 'me' for fromMe messages, but that sends to the
+        # self-chat instead of back to the actual conversation.
+        recipient = sender_num
 
         if self.wa_reply_delay > 0:
             time.sleep(self.wa_reply_delay)
