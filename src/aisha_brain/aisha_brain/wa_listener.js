@@ -67,6 +67,37 @@ async function start() {
         }
     });
 
+    // ---- Handle outgoing replies via stdin ----
+    // Python sends JSON lines: {"to": "971XXXXXXXXX", "message": "..."}
+    // If to === "me", send to the user's own JID (status@broadcast won't work;
+    // use sock.user.id which Baileys sets after connection).
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin });
+    rl.on('line', async (line) => {
+        try {
+            const { to, message } = JSON.parse(line.trim());
+            if (!to || !message) return;
+
+            let jid;
+            if (to === 'me' || to === 'self') {
+                // sock.user.id is our own JID set by Baileys after auth
+                jid = sock.user?.id;
+                if (!jid) {
+                    process.stderr.write('SEND_ERR: no self JID yet\n');
+                    return;
+                }
+            } else {
+                // Ensure the JID has the @s.whatsapp.net suffix
+                jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+            }
+
+            await sock.sendMessage(jid, { text: message });
+            process.stderr.write(`SEND_OK: ${jid}\n`);
+        } catch (err) {
+            process.stderr.write(`SEND_ERR: ${err.message}\n`);
+        }
+    });
+
     sock.ev.on('messages.upsert', ({ messages, type }) => {
         if (type !== 'notify') return;
         for (const msg of messages) {

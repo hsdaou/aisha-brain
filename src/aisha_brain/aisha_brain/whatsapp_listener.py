@@ -87,6 +87,9 @@ class WhatsAppListener(Node):
         self._last_from_me: bool = False
         self._reply_lock = threading.Lock()
 
+        # wa_listener.js subprocess handle — set in _monitor_loop
+        self._wa_process = None
+
         # Echo-loop prevention: timestamp of last outgoing WA send
         self._last_send_time: float = 0.0
 
@@ -135,11 +138,14 @@ class WhatsAppListener(Node):
             try:
                 process = subprocess.Popen(
                     ['node', self._listener_script],
+                    stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1
                 )
+                # Store the process so _send_whatsapp can write to its stdin
+                self._wa_process = process
 
                 threading.Thread(
                     target=self._log_stderr, args=(process,), daemon=True
@@ -282,6 +288,10 @@ class WhatsAppListener(Node):
         ).start()
 
     def _send_whatsapp(self, recipient: str, message: str):
+        """Send a reply through wa_listener.js stdin (same Baileys socket).
+
+        Falls back to `npx mudslide send` if the stdin pipe is unavailable.
+        """
         try:
             short = message[:80] + '...' if len(message) > 80 else message
             self.get_logger().info(f'WA reply → {recipient}: {short}')
@@ -289,18 +299,31 @@ class WhatsAppListener(Node):
             # Record send time BEFORE sending so the mute window starts immediately
             self._last_send_time = time.time()
 
+            # Primary: write a JSON line to wa_listener.js stdin
+            proc = self._wa_process
+            if proc and proc.stdin and proc.poll() is None:
+                payload = json.dumps({'to': recipient, 'message': message}) + '\n'
+                proc.stdin.write(payload)
+                proc.stdin.flush()
+                self.get_logger().info('WA reply sent ✓ (via stdin)')
+                return
+
+            # Fallback: use mudslide (opens a separate connection)
+            self.get_logger().warn('wa_listener stdin unavailable, falling back to mudslide')
             result = subprocess.run(
                 ['npx', 'mudslide', 'send', recipient, message],
                 capture_output=True, text=True, timeout=30
             )
             if result.returncode == 0:
-                self.get_logger().info('WA reply sent ✓')
+                self.get_logger().info('WA reply sent ✓ (via mudslide)')
             else:
                 self.get_logger().error(f'WA reply failed: {result.stderr.strip()}')
         except subprocess.TimeoutExpired:
             self.get_logger().error('WA reply timed out')
         except FileNotFoundError:
             self.get_logger().error('npx/mudslide not found')
+        except BrokenPipeError:
+            self.get_logger().error('WA reply failed: wa_listener.js stdin pipe broken')
         except Exception as e:
             self.get_logger().error(f'WA reply error: {e}')
 
