@@ -84,6 +84,7 @@ class WhatsAppListener(Node):
 
         # Sender tracking (protected by lock)
         self._last_sender_num: str = ''  # digits-only, e.g. '971509726902'
+        self._last_sender_jid: str = ''  # full JID, e.g. '269655394504744@lid' or '971XXX@s.whatsapp.net'
         self._last_from_me: bool = False
         self._reply_lock = threading.Lock()
 
@@ -158,6 +159,7 @@ class WhatsAppListener(Node):
                     try:
                         data = json.loads(line)
                         sender = data.get('from', '')
+                        raw_jid = data.get('rawJid', '')  # full JID with @suffix
                         text = data.get('message', '').strip()
                         from_me = data.get('fromMe', False)
 
@@ -210,6 +212,7 @@ class WhatsAppListener(Node):
 
                         with self._reply_lock:
                             self._last_sender_num = sender.split('@')[0] if '@' in sender else sender
+                            self._last_sender_jid = raw_jid or sender
                             self._last_from_me = from_me
 
                         self._msg_queue.put(text)
@@ -249,6 +252,7 @@ class WhatsAppListener(Node):
 
         with self._reply_lock:
             sender_num = self._last_sender_num
+            sender_jid = self._last_sender_jid
             from_me = self._last_from_me
 
         if not sender_num:
@@ -268,15 +272,15 @@ class WhatsAppListener(Node):
         self._last_sent_text = answer
         self._last_sent_time = now
 
-        # Determine reply recipient:
-        # - If sender_num matches allowed_number, the user is messaging
-        #   from the self-chat (Notes to Self). mudslide requires 'me'
-        #   to send to self — using the raw phone number silently fails.
-        # - Otherwise, send to the chat JID directly.
+        # Determine reply recipient — use the FULL original JID so wa_listener.js
+        # sends to the correct address (phone @s.whatsapp.net, LID @lid, group @g.us).
+        # Special case: if sender matches allowed_number, use 'me' for self-chat.
         if self.allowed_number and self.allowed_number in sender_num:
             recipient = 'me'
+        elif sender_jid:
+            recipient = sender_jid   # full JID with @suffix — wa_listener.js uses as-is
         else:
-            recipient = sender_num
+            recipient = sender_num   # fallback: bare number, JS will append @s.whatsapp.net
 
         if self.wa_reply_delay > 0:
             time.sleep(self.wa_reply_delay)

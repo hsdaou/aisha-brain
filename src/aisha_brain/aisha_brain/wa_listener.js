@@ -86,9 +86,12 @@ async function start() {
                     process.stderr.write('SEND_ERR: no self JID yet\n');
                     return;
                 }
+            } else if (to.includes('@')) {
+                // Full JID already provided (e.g. 269655394504744@lid or 971XXX@s.whatsapp.net)
+                jid = to;
             } else {
-                // Ensure the JID has the @s.whatsapp.net suffix
-                jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+                // Bare number — assume standard phone JID
+                jid = `${to}@s.whatsapp.net`;
             }
 
             await sock.sendMessage(jid, { text: message });
@@ -121,11 +124,11 @@ async function start() {
 
             if (!text.trim()) continue;
 
-            // Strip @suffix and tag fromMe so Python can distinguish authorized owner
+            // Keep both stripped sender (for auth matching) and full JID (for reply routing)
             const from = rawJid.replace(/@.+$/, '');
             const fromMe = !!msg.key.fromMe;
 
-            process.stdout.write(JSON.stringify({ from, message: text.trim(), fromMe }) + '\n');
+            process.stdout.write(JSON.stringify({ from, rawJid, message: text.trim(), fromMe }) + '\n');
         }
     });
 }
