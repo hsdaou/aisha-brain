@@ -59,7 +59,7 @@ class AdminNode(Node):
         self.declare_parameter('ollama_url', 'http://127.0.0.1:11434')
         self.declare_parameter('llm_model', 'llama3.2')
         self.declare_parameter('llm_timeout', 120.0)
-        self.declare_parameter('similarity_top_k', 6)
+        self.declare_parameter('similarity_top_k', 15)
 
         kb_path = self.get_parameter('knowledge_db_path').get_parameter_value().string_value
         ollama_url = self.get_parameter('ollama_url').get_parameter_value().string_value

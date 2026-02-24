@@ -200,16 +200,18 @@ def build_index():
     embed_model = HuggingFaceEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')
     documents = SimpleDirectoryReader(DATA_FOLDER).load_data()
 
-    # Use a small chunk size so each grade-entry / calendar section gets
-    # its own embedding vector for precise retrieval.
-    # chunk_size=256 tokens ≈ 2-3 sentences; overlap=32 preserves context.
-    splitter = SentenceSplitter(chunk_size=256, chunk_overlap=32)
+    # MarkdownNodeParser splits on ## headers so each grade section / calendar
+    # section becomes its own chunk with the header included as context.
+    # Sections larger than 512 tokens are further split by SentenceSplitter.
+    from llama_index.core.node_parser import MarkdownNodeParser
+    md_parser = MarkdownNodeParser()
+    sentence_splitter = SentenceSplitter(chunk_size=512, chunk_overlap=64)
 
     VectorStoreIndex.from_documents(
         documents,
         storage_context=storage_context,
         embed_model=embed_model,
-        transformations=[splitter],
+        transformations=[md_parser, sentence_splitter],
     )
     print(f'Indexed {len(documents)} source documents. Knowledge base saved to {CHROMA_PATH}')
 
