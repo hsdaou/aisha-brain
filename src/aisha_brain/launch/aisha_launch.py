@@ -30,6 +30,7 @@ from launch_ros.actions import Node
 
 # ── Hardcoded defaults (edit here rather than CLI to avoid int-typing bugs) ───
 ALLOWED_NUMBER = '971509726902'   # Authorized WhatsApp number (string, not int)
+MONITORED_JID  = '269655394504744'  # Second chat JID to monitor (for testing from own phone)
 
 # ── Node executables to kill on re-launch ─────────────────────────────────────
 _AISHA_EXECUTABLES = [
@@ -225,6 +226,8 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'allowed_number': str(allowed_number),   # str() ensures STRING type
+                    'monitored_jid': str(context.perform_substitution(
+                        LaunchConfiguration('monitored_jid'))),
                     'wa_reply_delay': 0.0,
                     'echo_mute_secs': 8.0,
                 }]
@@ -245,6 +248,7 @@ def generate_launch_description():
         DeclareLaunchArgument('llm_model',       default_value='llama3.2'),
         DeclareLaunchArgument('enable_whatsapp', default_value='true'),
         DeclareLaunchArgument('allowed_number',  default_value=ALLOWED_NUMBER),
+        DeclareLaunchArgument('monitored_jid',   default_value=MONITORED_JID),
 
         OpaqueFunction(function=create_nodes),
     ])

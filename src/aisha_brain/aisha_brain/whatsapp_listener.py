@@ -49,10 +49,19 @@ class WhatsAppListener(Node):
             'allowed_number', '971509726902',
             ParameterDescriptor(type=ParameterType.PARAMETER_STRING)
         )
+        # monitored_jid: optional second JID to accept messages from.
+        # When the WA session is on the user's own phone and they message the bot
+        # from a DIFFERENT number, the chat JID won't match allowed_number.
+        # Set this to the bot's chat-partner JID to accept those messages too.
+        self.declare_parameter(
+            'monitored_jid', '',
+            ParameterDescriptor(type=ParameterType.PARAMETER_STRING)
+        )
         self.declare_parameter('wa_reply_delay', 0.0)
         self.declare_parameter('echo_mute_secs', 8.0)
 
         self.allowed_number = self.get_parameter('allowed_number').get_parameter_value().string_value
+        self.monitored_jid = self.get_parameter('monitored_jid').get_parameter_value().string_value
         self.wa_reply_delay = self.get_parameter('wa_reply_delay').get_parameter_value().double_value
         self.echo_mute_secs = self.get_parameter('echo_mute_secs').get_parameter_value().double_value
 
@@ -94,8 +103,9 @@ class WhatsAppListener(Node):
         self._last_sent_time: float = 0.0
         self._reply_dedup_secs: float = 10.0   # suppress duplicate outgoing texts for 10 s
 
+        jid_info = f' + monitored_jid={self.monitored_jid}' if self.monitored_jid else ''
         self.get_logger().info(
-            f'WhatsApp Listener Online — authorized: {self.allowed_number} | '
+            f'WhatsApp Listener Online — authorized: {self.allowed_number}{jid_info} | '
             f'auto-reply enabled | echo_mute={self.echo_mute_secs}s'
         )
 
@@ -160,9 +170,17 @@ class WhatsAppListener(Node):
                                 continue
 
                         # ── Authorization check ─────────────────────────────
-                        is_authorized = from_me or (self.allowed_number in sender)
+                        # Only process messages from specific chat(s):
+                        # 1. sender JID contains allowed_number (incoming from user)
+                        # 2. sender JID contains monitored_jid (testing from own phone
+                        #    where the chat partner JID differs from allowed_number)
+                        is_authorized = self.allowed_number in sender
+                        if not is_authorized and self.monitored_jid:
+                            is_authorized = self.monitored_jid in sender
                         if not is_authorized:
-                            self.get_logger().warn(f'Ignored unauthorized: {sender}')
+                            self.get_logger().debug(
+                                f'Ignored msg (sender={sender}, fromMe={from_me}): {text[:40]}'
+                            )
                             continue
 
                         # ── Incoming deduplication ──────────────────────────
