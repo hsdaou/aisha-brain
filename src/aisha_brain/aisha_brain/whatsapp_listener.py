@@ -272,10 +272,20 @@ class WhatsAppListener(Node):
         self._last_sent_text = answer
         self._last_sent_time = now
 
-        # Determine reply recipient — use the FULL original JID so wa_listener.js
-        # sends to the correct address (phone @s.whatsapp.net, LID @lid, group @g.us).
-        # Special case: if sender matches allowed_number, use 'me' for self-chat.
+        # Determine reply recipient.
+        #
+        # LID JIDs (@lid) are Baileys' internal identifiers for linked devices —
+        # you CANNOT send messages to them. When the user messages from their own
+        # phone (fromMe=True or sender matches monitored_jid / allowed_number),
+        # the remoteJid is the LID, but the reply must go to 'me' (self-chat via
+        # sock.user.id) so it appears in their "Notes to Self" / own chat.
+        #
+        # For actual third-party senders, use the full JID (@s.whatsapp.net).
+        is_lid = sender_jid.endswith('@lid')
         if self.allowed_number and self.allowed_number in sender_num:
+            recipient = 'me'
+        elif is_lid or from_me:
+            # LID = linked device of the account owner → reply to self-chat
             recipient = 'me'
         elif sender_jid:
             recipient = sender_jid   # full JID with @suffix — wa_listener.js uses as-is
