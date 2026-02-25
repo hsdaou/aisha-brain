@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Fast DDS profile for the Raspberry Pi 5 (audio I/O nodes).
+  Runs: tts_node, stt_node
+  Device IP: 172.23.23.10  (edit to match your network)
+  participantID: 0
+
+  Usage:
+    export FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/fastdds_rpi.xml
+    ros2 launch aisha_brain rpi_launch.py
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+    <profiles>
+        <participant profile_name="aisha_rpi" is_default_profile="true">
+            <rtps>
+                <participantID>0</participantID>
+
+                <builtin>
+                    <discovery_config>
+                        <discoveryProtocol>SIMPLE</discoveryProtocol>
+                        <use_WriterLivelinessProtocol>AUTOMATIC</use_WriterLivelinessProtocol>
+                        <simpleEDP>
+                            <PUBWRITER_SUBREADER>true</PUBWRITER_SUBREADER>
+                            <PUBREADER_SUBWRITER>true</PUBREADER_SUBWRITER>
+                        </simpleEDP>
+                        <leaseDuration>
+                            <sec>20</sec>
+                        </leaseDuration>
+                        <initialAnnouncements>
+                            <count>5</count>
+                            <period>
+                                <sec>1</sec>
+                            </period>
+                        </initialAnnouncements>
+                    </discovery_config>
+
+                    <metatrafficUnicastLocatorList>
+                        <locator>
+                            <udpv4>
+                                <address>172.23.23.10</address>
+                            </udpv4>
+                        </locator>
+                    </metatrafficUnicastLocatorList>
+
+                    <initialPeersList>
+                        <locator>
+                            <udpv4>
+                                <address>172.23.23.10</address>
+                            </udpv4>
+                        </locator>
+                        <locator>
+                            <udpv4>
+                                <address>172.23.23.20</address>
+                            </udpv4>
+                        </locator>
+                        <locator>
+                            <udpv4>
+                                <address>172.23.23.51</address>
+                            </udpv4>
+                        </locator>
+                    </initialPeersList>
+                </builtin>
+
+                <defaultUnicastLocatorList>
+                    <locator>
+                        <udpv4>
+                            <address>172.23.23.10</address>
+                        </udpv4>
+                    </locator>
+                </defaultUnicastLocatorList>
+
+                <sendSocketBufferSize>1048576</sendSocketBufferSize>
+                <listenSocketBufferSize>4194304</listenSocketBufferSize>
+                <useBuiltinTransports>true</useBuiltinTransports>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>
