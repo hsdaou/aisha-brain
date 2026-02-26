@@ -56,7 +56,10 @@ case "$TARGET" in
         ;;
     ws)
         LAUNCH_FILE="ws_launch.py"
-        export FASTRTPS_DEFAULT_PROFILES_FILE="$CONFIG_DIR/fastdds_ws.xml"
+        # No FastDDS profile for ws — dev mode runs all nodes locally
+        # and binding to a specific IP breaks loopback discovery.
+        # Only set the profile for distributed deployment (relay-only):
+        #   export FASTRTPS_DEFAULT_PROFILES_FILE="$CONFIG_DIR/fastdds_ws.xml"
         ;;
     all)
         LAUNCH_FILE="aisha_launch.py"

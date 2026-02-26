@@ -168,6 +168,7 @@ class AdminNode(Node):
                 return
 
             # Step 1: Retrieve relevant context from the vector store
+            self.get_logger().info('Retrieving context from knowledge base...')
             retriever = self.index.as_retriever(
                 similarity_top_k=self.similarity_top_k,
                 embed_model=self.embed_model
@@ -186,23 +187,27 @@ class AdminNode(Node):
                 for n in nodes
             ) if nodes else "No specific context found."
 
-            self.get_logger().debug(f'Retrieved {len(nodes)} chunks for query: {retrieval_query!r}')
+            self.get_logger().info(f'Retrieved {len(nodes)} chunks for query')
 
             # Step 2: Build chat messages with system prompt + history + context
             messages = self._build_messages(history, user_question, context_str)
 
             # Step 3: Call LLM (blocking — safe here because we are in a daemon thread)
+            self.get_logger().info(f'Calling Ollama ({self.llm.model})...')
             response = self.llm.chat(messages)
             answer = str(response.message.content).strip()
 
             if not answer:
                 answer = "I could not find information about that. Could you rephrase your question?"
 
-            self._publish(answer)
             self.get_logger().info(f'Answer: {answer[:120]}...' if len(answer) > 120 else f'Answer: {answer}')
+            self._publish(answer)
+            self.get_logger().info('Published to /robot_speech')
 
         except Exception as e:
-            self.get_logger().error(f'Query error: {e}')
+            self.get_logger().error(f'Query error: {type(e).__name__}: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
             self._publish("I encountered an error processing your question. Please try again.")
 
     def _publish(self, text: str):
