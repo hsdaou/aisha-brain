@@ -182,7 +182,7 @@ class AdminNode(Node):
 
             nodes = retriever.retrieve(retrieval_query)
             context_str = "\n\n".join(
-                f"[Source: {n.metadata.get('file_name', 'knowledge base')}]\n{n.text}"
+                f"[Source: {n.metadata.get('file_name', 'knowledge base')}]\n{n.get_content()}"
                 for n in nodes
             ) if nodes else "No specific context found."
 
