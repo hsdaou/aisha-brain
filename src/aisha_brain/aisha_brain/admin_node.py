@@ -1,3 +1,4 @@
+import re
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -59,7 +60,7 @@ class AdminNode(Node):
         self.declare_parameter('ollama_url', 'http://127.0.0.1:11434')
         self.declare_parameter('llm_model', 'llama3.2')
         self.declare_parameter('llm_timeout', 120.0)
-        self.declare_parameter('similarity_top_k', 15)
+        self.declare_parameter('similarity_top_k', 6)
 
         kb_path = self.get_parameter('knowledge_db_path').get_parameter_value().string_value
         ollama_url = self.get_parameter('ollama_url').get_parameter_value().string_value
@@ -79,10 +80,12 @@ class AdminNode(Node):
         self.embed_model = None
         self.llm = None
         self.similarity_top_k = similarity_top_k
+        self._chroma_collection = None  # direct ChromaDB handle for grade-filtered queries
 
         try:
             db = chromadb.PersistentClient(path=kb_path)
             chroma_collection = db.get_or_create_collection("school_info")
+            self._chroma_collection = chroma_collection
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
             self.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
@@ -169,10 +172,6 @@ class AdminNode(Node):
 
             # Step 1: Retrieve relevant context from the vector store
             self.get_logger().info('Retrieving context from knowledge base...')
-            retriever = self.index.as_retriever(
-                similarity_top_k=self.similarity_top_k,
-                embed_model=self.embed_model
-            )
 
             # Build retrieval query: prepend last user turn for follow-up context
             retrieval_query = user_question
@@ -181,13 +180,80 @@ class AdminNode(Node):
                 if last_user and last_user.lower() != user_question.lower():
                     retrieval_query = f"{last_user} {user_question}"
 
-            nodes = retriever.retrieve(retrieval_query)
+            # ── Grade-aware retrieval ────────────────────────────────────────
+            # Detect grade/level mentions and pre-filter ChromaDB by section
+            # metadata so the vector search stays within the right grade.
+            grade_match = re.search(
+                r'grade\s*(\d{1,2})\s*([sl])?',
+                retrieval_query, re.IGNORECASE
+            )
+            filtered_nodes = []
+            if grade_match and self._chroma_collection is not None:
+                grade_num = grade_match.group(1)
+                suffix = (grade_match.group(2) or '').upper()
+                # Match section names like "Grade 8 UAE / Grade 9 GULF"
+                # or "Grade 9S UAE / Grade 10S GULF"
+                pattern = f"Grade {grade_num}{suffix}"
+                self.get_logger().info(f'Grade filter: looking for sections containing "{pattern}"')
+                try:
+                    results = self._chroma_collection.get(
+                        where={"section": {"$ne": ""}},
+                        include=["documents", "metadatas"]
+                    )
+                    # Find matching section names
+                    matching_sections = set()
+                    if results and results.get('metadatas'):
+                        for meta in results['metadatas']:
+                            sec = meta.get('section', '')
+                            if pattern.lower() in sec.lower():
+                                matching_sections.add(sec)
+
+                    if matching_sections:
+                        self.get_logger().info(
+                            f'Grade filter matched sections: {matching_sections}'
+                        )
+                        # Use ChromaDB where filter for targeted retrieval
+                        from chromadb.types import Where
+                        if len(matching_sections) == 1:
+                            where_filter = {"section": list(matching_sections)[0]}
+                        else:
+                            where_filter = {"section": {"$in": list(matching_sections)}}
+
+                        grade_results = self._chroma_collection.query(
+                            query_texts=[retrieval_query],
+                            n_results=self.similarity_top_k,
+                            where=where_filter,
+                            include=["documents", "metadatas", "distances"]
+                        )
+                        if grade_results and grade_results['documents'][0]:
+                            from llama_index.core.schema import TextNode, NodeWithScore
+                            for doc, meta, dist in zip(
+                                grade_results['documents'][0],
+                                grade_results['metadatas'][0],
+                                grade_results['distances'][0]
+                            ):
+                                node = TextNode(text=doc, metadata=meta)
+                                # ChromaDB distance → score (lower distance = higher score)
+                                filtered_nodes.append(NodeWithScore(node=node, score=1.0 - dist))
+                except Exception as e:
+                    self.get_logger().warn(f'Grade filter failed, falling back to standard retrieval: {e}')
+
+            # Fall back to standard vector retrieval if no grade filter hit
+            if filtered_nodes:
+                nodes = filtered_nodes
+                self.get_logger().info(f'Grade-filtered retrieval: {len(nodes)} chunks')
+            else:
+                retriever = self.index.as_retriever(
+                    similarity_top_k=self.similarity_top_k,
+                    embed_model=self.embed_model
+                )
+                nodes = retriever.retrieve(retrieval_query)
+                self.get_logger().info(f'Standard retrieval: {len(nodes)} chunks')
+
             context_str = "\n\n".join(
-                f"[Source: {n.metadata.get('file_name', 'knowledge base')}]\n{n.get_content()}"
+                f"[Source: {n.metadata.get('file_name', 'knowledge base')} | {n.metadata.get('section', '')}]\n{n.get_content()}"
                 for n in nodes
             ) if nodes else "No specific context found."
-
-            self.get_logger().info(f'Retrieved {len(nodes)} chunks for query')
 
             # Step 2: Build chat messages with system prompt + history + context
             messages = self._build_messages(history, user_question, context_str)

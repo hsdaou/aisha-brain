@@ -59,27 +59,64 @@ def build_index():
         print(f"No documents found in {DATA_FOLDER}")
         sys.exit(0)
 
-    # Preprocess documents to inject headers directly into the text for better embedding
+    # ── Preprocess: split each markdown ## section into its own Document ────────
+    # This prevents chunks from crossing section boundaries (e.g. Grade 8
+    # exam entries leaking into a Grade 9 chunk).  Each section's header is
+    # prepended to every bullet line so the embedding always carries the
+    # grade/topic context even in small chunks.
     from llama_index.core import Document
     new_docs = []
     for doc in documents:
-        if doc.metadata.get('file_name', '').endswith('.md'):
+        file_name = doc.metadata.get('file_name', '')
+        if file_name.endswith('.md'):
             lines = doc.get_content().split('\n')
-            current_header = ""
-            for i, line in enumerate(lines):
-                if line.startswith('## '):
+            # Gather the top-level title (# ...) as global context
+            global_title = ''
+            sections = []          # list of (header, [lines])
+            current_header = ''
+            current_lines = []
+
+            for line in lines:
+                if line.startswith('# ') and not line.startswith('## '):
+                    global_title = line[2:].strip()
+                elif line.startswith('## '):
+                    # Flush previous section
+                    if current_header and current_lines:
+                        sections.append((current_header, current_lines))
                     current_header = line[3:].strip()
-                elif line.startswith('- **') and current_header:
-                    lines[i] = f"- [{current_header}] **" + line[4:]
-            new_docs.append(Document(text='\n'.join(lines), metadata=doc.metadata))
+                    current_lines = []
+                else:
+                    current_lines.append(line)
+            # Flush last section
+            if current_header and current_lines:
+                sections.append((current_header, current_lines))
+
+            if sections:
+                for header, sec_lines in sections:
+                    # Inject header into every bullet line for embedding context
+                    tagged = []
+                    for sl in sec_lines:
+                        if sl.startswith('- **'):
+                            tagged.append(f"- [{header}] **" + sl[4:])
+                        else:
+                            tagged.append(sl)
+                    section_text = f"# {global_title}\n## {header}\n" + '\n'.join(tagged)
+                    new_docs.append(Document(
+                        text=section_text.strip(),
+                        metadata={**doc.metadata, 'section': header}
+                    ))
+            else:
+                # No ## sections found — keep as-is
+                new_docs.append(doc)
         else:
             new_docs.append(doc)
     documents = new_docs
+    print(f'Expanded to {len(documents)} section-level documents.')
 
-    # We rely entirely on the injected headers and SentenceSplitter.
-    # By using a very small chunk size for tables/lists (128 tokens), 
-    # we prevent semantic dilution. A single match will dominate the chunk.
-    sentence_splitter = SentenceSplitter(chunk_size=128, chunk_overlap=16)
+    # Chunk size 256 tokens with 32 overlap — large enough to keep several
+    # exam entries together with their grade header, small enough to stay
+    # focused.  Each chunk is guaranteed to be from a single grade section.
+    sentence_splitter = SentenceSplitter(chunk_size=256, chunk_overlap=32)
 
     print(f'Building index from {len(documents)} documents...')
     # Build vector store index locally
