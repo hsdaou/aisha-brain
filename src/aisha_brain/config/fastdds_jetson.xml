@@ -18,7 +18,7 @@
                 <builtin>
                     <discovery_config>
                         <discoveryProtocol>SIMPLE</discoveryProtocol>
-                        <use_WriterLivelinessProtocol>AUTOMATIC</use_WriterLivelinessProtocol>
+
                         <simpleEDP>
                             <PUBWRITER_SUBREADER>true</PUBWRITER_SUBREADER>
                             <PUBREADER_SUBWRITER>true</PUBREADER_SUBWRITER>

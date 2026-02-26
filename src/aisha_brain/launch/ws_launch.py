@@ -1,11 +1,12 @@
-"""AI-SHA Workstation Launch — WhatsApp relay and optional full-stack dev mode.
+"""AI-SHA Workstation Launch — full-stack dev mode by default.
 
-By default, launches only the whatsapp_listener (relay node).
-Pass dev_mode:=true to launch ALL nodes locally (same as aisha_launch.py).
+By default, launches ALL nodes locally (same as aisha_launch.py).
+Pass dev_mode:=false to launch only the whatsapp_listener (relay mode
+for distributed deployment where brain/admin run on Jetson).
 
 Usage:
-  ros2 launch aisha_brain ws_launch.py                       # relay only
-  ros2 launch aisha_brain ws_launch.py dev_mode:=true        # all nodes (dev)
+  ros2 launch aisha_brain ws_launch.py                        # all nodes (dev)
+  ros2 launch aisha_brain ws_launch.py dev_mode:=false        # relay only
 
 Set the FastDDS profile externally before launching:
   export FASTRTPS_DEFAULT_PROFILES_FILE=.../config/fastdds_ws.xml
@@ -92,7 +93,7 @@ def generate_launch_description():
         ]
 
     return LaunchDescription([
-        DeclareLaunchArgument('dev_mode',       default_value='false',
+        DeclareLaunchArgument('dev_mode',       default_value='true',
                               description='Launch all nodes locally (dev/testing)'),
         DeclareLaunchArgument('allowed_number', default_value=ALLOWED_NUMBER),
         DeclareLaunchArgument('monitored_jid',  default_value=MONITORED_JID),
