@@ -6,8 +6,29 @@ import queue
 import subprocess
 import tempfile
 import os
+import re
 import time
 import numpy as np
+
+
+# ── Wake word variants ────────────────────────────────────────────────────────
+# Whisper may transcribe "ARIA" / "Hey ARIA" in various ways depending on
+# accent, noise, and model size.  We match against these known variants.
+# Order matters: longer prefixes are checked first so "hey aria" is stripped
+# before "aria" alone.
+_WAKE_PREFIXES = [
+    'hey aria',  'hey arya',  'hey area',  'hey ariya',
+    'hi aria',   'hi arya',   'hi area',
+    'aria',      'arya',      'area',      'ariya',
+]
+
+# Compiled regex: match any wake prefix at the start of the string,
+# optionally followed by a comma / period / colon / space.
+_WAKE_RE = re.compile(
+    r'^(?:' + '|'.join(re.escape(p) for p in _WAKE_PREFIXES) + r')'
+    r'[\s,.:;!?\-]*',
+    re.IGNORECASE,
+)
 
 
 class STTNode(Node):
@@ -16,6 +37,12 @@ class STTNode(Node):
     Records audio via arecord (ALSA), transcribes with Faster-Whisper, and
     publishes text to /speech/text (Jetson architecture standard topic).
 
+    Wake word support:
+      When enabled (default), only speech preceded by "ARIA" or "Hey ARIA"
+      is published. After a wake word trigger, a listening window stays
+      open (default 15 s) so follow-up sentences don't need the wake word
+      again. The window is also extended when the robot responds (TTS).
+
     Feedback prevention: subscribes to /speaker/playing (Bool).
     When True, microphone capture is paused so the robot does not transcribe
     its own TTS output.
@@ -23,6 +50,7 @@ class STTNode(Node):
     Target architecture topics (ros2_architecture.pdf):
       Publishes:  /speech/text      (std_msgs/String)
       Subscribes: /speaker/playing  (std_msgs/Bool)
+                  /robot_speech     (std_msgs/String)  — extends wake window
 
     Requires:
       - faster-whisper Python package  (pip install faster-whisper)
@@ -49,6 +77,10 @@ class STTNode(Node):
         self.declare_parameter('chunk_duration', 5.0)       # seconds per capture chunk
         self.declare_parameter('audio_device', 'plughw:1,0')  # ALSA capture device
 
+        # Wake word parameters
+        self.declare_parameter('wake_word_enabled', True)
+        self.declare_parameter('wake_word_timeout', 15.0)    # seconds of continued listening
+
         self.whisper_model_size = self.get_parameter('whisper_model').get_parameter_value().string_value
         self.whisper_device = self.get_parameter('whisper_device').get_parameter_value().string_value
         self.compute_type = self.get_parameter('whisper_compute_type').get_parameter_value().string_value
@@ -57,6 +89,16 @@ class STTNode(Node):
         self.sample_rate = self.get_parameter('sample_rate').get_parameter_value().integer_value
         self.chunk_duration = self.get_parameter('chunk_duration').get_parameter_value().double_value
         self.audio_device = self.get_parameter('audio_device').get_parameter_value().string_value
+
+        self.wake_word_enabled = self.get_parameter('wake_word_enabled').get_parameter_value().bool_value
+        self.wake_word_timeout = self.get_parameter('wake_word_timeout').get_parameter_value().double_value
+
+        # Wake word state: timestamp until which we accept speech without wake word
+        self._wake_active_until: float = 0.0
+
+        # Extend listening window when the robot responds (conversation continuation)
+        if self.wake_word_enabled:
+            self.create_subscription(String, '/robot_speech', self._on_robot_speech, 10)
 
         self._msg_queue = queue.SimpleQueue()
         self._publish_timer = self.create_timer(0.1, self._publish_pending)
@@ -74,10 +116,15 @@ class STTNode(Node):
             )
             return
 
+        wake_status = (
+            f'wake_word=ARIA (timeout={self.wake_word_timeout}s)'
+            if self.wake_word_enabled else 'wake_word=disabled (open mic)'
+        )
         self.get_logger().info(
             f'AI-SHA STT Active — faster-whisper/{self.whisper_model_size} '
             f'on {self.whisper_device} ({self.compute_type}), '
-            f'mic={self.audio_device}, chunk={self.chunk_duration}s'
+            f'mic={self.audio_device}, chunk={self.chunk_duration}s, '
+            f'{wake_status}'
         )
         threading.Thread(target=self._listen_loop, daemon=True).start()
 
@@ -113,6 +160,81 @@ class STTNode(Node):
         self._is_speaker_playing = msg.data
         state = 'muted (TTS playing)' if msg.data else 'listening'
         self.get_logger().debug(f'STT mic: {state}')
+
+    # ── Robot speech callback — extend listening window ───────────────────────
+
+    def _on_robot_speech(self, msg: String):
+        """When the robot speaks, extend the wake-word listening window.
+
+        This allows natural conversation continuation: after the robot answers,
+        the user can ask a follow-up without repeating the wake word.
+        """
+        if msg.data.strip():
+            self._wake_active_until = time.monotonic() + self.wake_word_timeout
+            self.get_logger().debug(
+                f'Wake window extended (robot spoke) — '
+                f'listening for {self.wake_word_timeout}s'
+            )
+
+    # ── Wake word detection ──────────────────────────────────────────────────
+
+    def _check_wake_word(self, text: str) -> tuple:
+        """Check if text contains the wake word and strip it.
+
+        Returns:
+            (wake_triggered, cleaned_text):
+                wake_triggered: True if wake word was found in this utterance
+                cleaned_text:   text with the wake word prefix removed
+        """
+        match = _WAKE_RE.match(text)
+        if match:
+            cleaned = text[match.end():].strip()
+            return True, cleaned
+        return False, text
+
+    def _should_publish(self, text: str) -> tuple:
+        """Decide whether to publish this transcription based on wake word state.
+
+        Returns:
+            (should_publish, text_to_publish)
+        """
+        if not self.wake_word_enabled:
+            return True, text
+
+        now = time.monotonic()
+
+        # Check if the transcription contains the wake word
+        triggered, cleaned = self._check_wake_word(text)
+
+        if triggered:
+            # Wake word found — activate listening window
+            self._wake_active_until = now + self.wake_word_timeout
+            self.get_logger().info(
+                f'Wake word detected! Listening for {self.wake_word_timeout}s'
+            )
+            if cleaned:
+                # "Hey ARIA, what are the fees?" → publish "what are the fees?"
+                return True, cleaned
+            else:
+                # Just "Hey ARIA" alone — activate window, don't publish empty
+                return False, ''
+
+        # No wake word in this utterance — check if listening window is active
+        if now < self._wake_active_until:
+            remaining = self._wake_active_until - now
+            self.get_logger().debug(
+                f'Wake window active ({remaining:.1f}s left) — passing through'
+            )
+            # Extend the window on continued speech
+            self._wake_active_until = now + self.wake_word_timeout
+            return True, text
+
+        # No wake word, window expired — discard
+        self.get_logger().debug(
+            f'Discarded (no wake word): "{text[:60]}..."'
+            if len(text) > 60 else f'Discarded (no wake word): "{text}"'
+        )
+        return False, ''
 
     # ── ROS publish (called from timer in executor thread) ────────────────────
 
@@ -195,7 +317,10 @@ class STTNode(Node):
                 text = ' '.join(seg.text.strip() for seg in segments).strip()
 
                 if text and text.lower() not in noise_phrases and len(text) > 2:
-                    self._msg_queue.put(text)
+                    # Apply wake word filter
+                    should_pub, pub_text = self._should_publish(text)
+                    if should_pub and pub_text:
+                        self._msg_queue.put(pub_text)
 
             except subprocess.TimeoutExpired:
                 self.get_logger().warn('STT: audio capture timed out, retrying')
